@@ -30,7 +30,10 @@ const config = {
   review: { points: "AGENTS.md", profile: "review", status: "agent-review" },
 };
 test("the default review status is neutral and projects can override it", () => {
-  assert.equal(settings({ ...config, review: { points: "AGENTS.md", profile: "review" } }).review.status, "agent-review");
+  assert.equal(
+    settings({ ...config, review: { points: "AGENTS.md", profile: "review" } }).review.status,
+    "agent-review",
+  );
   assert.equal(
     settings({ ...config, review: { points: "AGENTS.md", profile: "review", status: "project-review" } }).review.status,
     "project-review",

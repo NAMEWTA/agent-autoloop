@@ -121,3 +121,13 @@ test("why retains failed attempts and uses each attempt's rules version without 
   assert.ok(output.includes(`规则版本 #${afterVersion}`));
   assert.ok(!output.includes("private-instructions"));
 });
+
+test("a runtime without a clickable link still exposes its session in why and status", async () => {
+  hub.execute("rules", [config], start + 390000);
+  hub.ingest("shop", { id: "linkless", type: "order.created", subject: "linkless" }, start + 400000);
+  const job = hub.claimNext("mac-mini", "linkless-claim", start + 401000)!;
+  hub.started(job.run, job.token, { session: "logical-runtime-session" }, start + 402000);
+  hub.finish(job.run, job.token, { outcome: "done", summary: "已完成", session: "logical-runtime-session" }, start + 403000);
+  assert.match(await cli("why", String(job.run)), /会话编号：logical-runtime-session/);
+  assert.match(await cli("status"), /会话编号：logical-runtime-session/);
+});

@@ -18,23 +18,36 @@ const cwd = join(home, "project");
 mkdirSync(cwd);
 mkdirSync(join(home, "herdr"));
 const runtimeState = join(home, "fake-hc.json");
-const question = '问了一个问题\n\n```agent-autoloop\n{"ask":[{"title":"选一个颜色","text":"试跑","options":["蓝色","绿色"],"key":"color"}]}\n```';
+const question =
+  '问了一个问题\n\n```agent-autoloop\n{"ask":[{"title":"选一个颜色","text":"试跑","options":["蓝色","绿色"],"key":"color"}]}\n```';
 writeFileSync(runtimeState, JSON.stringify({ text: question }));
-writeFileSync(join(home, "herdr", "profiles.json"), JSON.stringify({
-  profiles: {
-    developer: {
-      template: "aal-codex", access: "edit", session: "autoloop-test",
-      hc: [process.execPath, join(import.meta.dirname, "fixtures/fake-hc.mjs"), "--state", runtimeState],
-      rpcTimeoutMs: 2000, turnTimeoutMs: 5000, monitorIntervalMs: 20,
+writeFileSync(
+  join(home, "herdr", "profiles.json"),
+  JSON.stringify({
+    profiles: {
+      developer: {
+        template: "aal-codex",
+        access: "edit",
+        session: "autoloop-test",
+        hc: [process.execPath, join(import.meta.dirname, "fixtures/fake-hc.mjs"), "--state", runtimeState],
+        rpcTimeoutMs: 2000,
+        turnTimeoutMs: 5000,
+        monitorIntervalMs: 20,
+      },
     },
-  },
-}));
-writeFileSync(join(home, "rules.json"), JSON.stringify({
-  sources: { app: { name: "测试" } },
-  agents: { agent: { name: "Herdr", worker: "test", use: "herdr-core", options: { profile: "developer" } } },
-  channels: {},
-  rules: [{ name: "业务闭环", when: { source: "app", types: ["start"] }, to: "agent", cwd, prompt: "读本轮资料；确认后继续。" }],
-}));
+  }),
+);
+writeFileSync(
+  join(home, "rules.json"),
+  JSON.stringify({
+    sources: { app: { name: "测试" } },
+    agents: { agent: { name: "Herdr", worker: "test", use: "herdr-core", options: { profile: "developer" } } },
+    channels: {},
+    rules: [
+      { name: "业务闭环", when: { source: "app", types: ["start"] }, to: "agent", cwd, prompt: "读本轮资料；确认后继续。" },
+    ],
+  }),
+);
 const hub = await import("../host/runtime.ts");
 const { serve } = await import("../host/http.ts");
 const { hubClient } = await import("../protocol/client.ts");
@@ -56,7 +69,17 @@ test("Herdr business ask and answer use one terminal through the real hub and wo
       if (check(state)) return state;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    assert.fail(`loop did not finish: ${JSON.stringify(worker.entries())}`);
+    const pending = worker.entries().map((entry: any) => ({
+      run: entry.run,
+      turn: entry.turn,
+      state: entry.state,
+      error: entry.recoveryError,
+    }));
+    const methods = readFileSync(`${runtimeState}.calls`, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).method);
+    assert.fail(`loop did not finish: ${JSON.stringify({ pending, methods })}`);
   }
   let session: string | undefined;
   try {
@@ -72,7 +95,10 @@ test("Herdr business ask and answer use one terminal through the real hub and wo
     const done = await until((now) => now.runs.filter((run: any) => run.state === "done").length === 2);
     assert.equal(done.cards.length, 0);
     assert.ok(done.runs.every((run: any) => run.session === session));
-    const calls = readFileSync(`${runtimeState}.calls`, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const calls = readFileSync(`${runtimeState}.calls`, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
     assert.equal(calls.filter((call) => call.method === "terminal.run").length, 1);
     const sends = calls.filter((call) => call.method === "terminal.send");
     assert.equal(sends.length, 1);

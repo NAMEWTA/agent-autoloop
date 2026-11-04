@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        还在探索的想法可以到 [想法交流](https://github.com/KKKKhazix/agent-autoloop/discussions/categories/ideas) 讨论。
+        提交前请查看 [本仓库已有建议](https://github.com/NAMEWTA/agent-autoloop/issues)，避免重复；也欢迎在已有问题中补充使用场景。
         新 Agent、来源和通道通过插件接入；内核保持零运行时依赖，界面由独立客户端提供。
   - type: textarea
     id: problem

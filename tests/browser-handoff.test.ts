@@ -40,11 +40,11 @@ export async function runTask(turn) {
     allowedActions: ["只读页面", "仅关闭本次新建的标签"],
   };
   writeFileSync(join(dir, "browser.json"), JSON.stringify(task));
-  const run = (args: string[] = [], result = "done") =>
+  const run = (args: string[] = [], result = "done", parentSession = "") =>
     spawnSync(process.execPath, ["handoff.ts", "browser.json", ...args], {
       cwd: dir,
       encoding: "utf8",
-      env: { ...process.env, AGENT_AUTOLOOP_APP: app, RUNTIME_RESULT: result },
+      env: { ...process.env, AGENT_AUTOLOOP_APP: app, AGENT_AUTOLOOP_SESSION: parentSession, RUNTIME_RESULT: result },
     });
   return { dir, task, run };
 }
@@ -64,6 +64,7 @@ test("the copied recipe uses a trusted profile and passes literal scope with a l
     .split("\n")
     .map((line) => JSON.parse(line));
   assert.equal(calls[0].resume, null);
+  assert.equal(calls[0].parentSession, undefined);
   assert.deepEqual(calls[0].options, { profile: "browser" });
   assert.equal(calls[0].access, "read");
   assert.deepEqual(calls[0].execution, { run: 1, attempt: 1, turn: 1 });
@@ -101,12 +102,23 @@ test("failed and uncertain runtime results keep their evidence and session, with
 
 test("resuming an uncertain browser task only reconciles the same execution", () => {
   const { dir, run } = fixture();
-  const first = run([], "uncertain");
+  const first = run([], "uncertain", "original-parent");
   const session = /Autoloop 会话：(browser-[^\]]+)/.exec(first.stdout)![1];
-  const recovered = run(["--resume", session]);
+  const recovered = run(["--resume", session], "done", "different-parent");
   assert.equal(recovered.status, 0, recovered.stderr);
   assert.match(recovered.stdout, /已核实原网页结果/);
   const firstTurn = JSON.parse(readFileSync(join(dir, "called.jsonl"), "utf8"));
   const recoveredTurn = JSON.parse(readFileSync(join(dir, "recovered.jsonl"), "utf8"));
+  assert.equal(firstTurn.parentSession, "original-parent");
   assert.deepEqual(recoveredTurn, firstTurn);
+});
+
+test("a nested browser task registers its stable parent session before entering the runtime", () => {
+  const { dir, run } = fixture();
+  const result = run([], "done", "parent-logical-session");
+  assert.equal(result.status, 0, result.stderr);
+  const turn = JSON.parse(readFileSync(join(dir, "called.jsonl"), "utf8"));
+  assert.equal(turn.parentSession, "parent-logical-session");
+  assert.notEqual(turn.session, turn.parentSession);
+  assert.notEqual(turn.cwd, dir);
 });

@@ -61,7 +61,6 @@ test("a lost delivery wrapper cannot turn an uncertain managed review into a ret
   assert.deepEqual(adapter.read(stopped + "交付完成", 0, ""), { text: "交付完成", finished: true });
 });
 
-
 test("delivery recovery distinguishes a finished child from an observation error", async () => {
   const folder = mkdtempSync(join(tmpdir(), "autoloop-delivery-recovery-"));
   try {
@@ -82,6 +81,20 @@ test("delivery recovery distinguishes a finished child from an observation error
     assert.equal(finished.finished, true);
     assert.ok(finished.error);
     assert.equal(finished.text, undefined);
+    writeFileSync(
+      join(folder, "review.json"),
+      JSON.stringify({ stopped: true, turn: { session: "existing-review" } }),
+    );
+    const stopped = await recoverReview(folder, async () => {
+      assert.fail("confirmed inner stop must not become an uncertain observation again");
+    });
+    assert.equal(stopped.finished, true);
+    assert.ok(stopped.error);
+    writeFileSync(
+      join(folder, "review.json"),
+      JSON.stringify({ stopped: true, turn: { session: "different-review" } }),
+    );
+    assert.deepEqual(await recoverReview(folder, async () => ({ state: "uncertain" })), { state: "uncertain" });
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }

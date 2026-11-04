@@ -2,7 +2,13 @@
 // here, in protocol/rules.ts.
 export type Access = "read" | "edit" | "full";
 export type Source = { name: string; adapter?: string };
-type AgentOptions = { model?: string; effort?: string; command?: string[]; timeout?: number; options?: Record<string, unknown> };
+type AgentOptions = {
+  model?: string;
+  effort?: string;
+  command?: string[];
+  timeout?: number;
+  options?: Record<string, unknown>;
+};
 export type Agent = AgentOptions & { name: string; worker: string; use: string; access: Access };
 export type Channel = { name: string; answerers?: string[]; links?: boolean };
 export type Tell = "always" | "needed" | "never";

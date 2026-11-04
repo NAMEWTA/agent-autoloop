@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        安装和配置问题也可以到 [使用问答](https://github.com/KKKKhazix/agent-autoloop/discussions/categories/q-a) 交流。
-        安全问题请按 [安全说明](https://github.com/KKKKhazix/agent-autoloop/blob/main/SECURITY.md) 联系维护者。
+        安装和配置问题请先查阅 [本分支安装说明](https://github.com/NAMEWTA/agent-autoloop/blob/main/INSTALL.md)。
+        安全问题请按 [安全说明](https://github.com/NAMEWTA/agent-autoloop/blob/main/SECURITY.md) 联系维护者。
         不要上传密钥、带权限的卡片链接、完整配置、数据库或真实业务资料。
   - type: input
     id: version

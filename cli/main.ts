@@ -129,6 +129,7 @@ function agentsToUse(named: Flags, worker: string) {
   const script = text(named.script);
   if (named.script !== undefined && !script) return fail("--script 需要一个可执行文件路径");
   if (script) return { agent: { name: "Script", worker, use: "script", command: [script] } };
+  if (named.profile !== undefined && !text(named.profile)) return fail("--profile 需要一个本机配置名称");
   const profile = text(named.profile) ?? "developer";
   if (!/^[a-z][a-z0-9_-]{0,63}$/.test(profile)) return fail("--profile 需要小写字母开头的配置名称");
   return { agent: { name: "Herdr Agent", worker, use: "herdr-core", options: { profile } } };
@@ -297,6 +298,7 @@ async function status() {
     const shown = run.state === "queued" && run.attempts > 0 ? "等重派" : (RUN_STATES[run.state] ?? run.state);
     const outcome = run.summary || run.error;
     console.log(`  #${run.id} ${run.rule} ${shown}${outcome ? `：${outcome}` : ""}`);
+    if (run.session) console.log(`    会话编号：${run.session}`);
   }
   if (state.unrouted.length) console.log("\n没有规则接的事件");
   for (const { source, type, subject, summary } of state.unrouted.slice(0, 5)) {

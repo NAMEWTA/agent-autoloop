@@ -1,7 +1,16 @@
 // The review before a merge. Only a text snapshot of the branch's own changes leaves Git: no checkout, so nothing from
 // the pull request can run here.
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { git, matches, type Settings } from "./project.ts";
@@ -51,11 +60,14 @@ function saveJSON(file: string, value: unknown) {
   }
 }
 const markerFile = (folder: string) => join(folder, "delivery-review.json");
+const stopFile = (folder: string) => join(folder, "delivery-stop.json");
 function markStopped(marker: ReviewMarker) {
   const journal = readJSON<ReviewJournal>(marker.journal);
   if (journal.turn.session === marker.turn.session) saveJSON(marker.journal, { ...journal, stopped: true });
 }
 export async function stopReview(folder: string, reason: "cancel" | "timeout") {
+  // This must precede the marker lookup: a live wrapper may not have reached reviewSnapshot yet.
+  saveJSON(stopFile(folder), { reason });
   if (!existsSync(markerFile(folder))) return true;
   const marker = readJSON<ReviewMarker>(markerFile(folder));
   const { stopTask } = await import("../herdr-core/task.ts");
@@ -68,6 +80,12 @@ export async function recoverReview(folder: string, recover?: Reviewer): Promise
     return { finished: true, error: "交付进程已中断，下次从 GitHub 已确认状态继续" };
   }
   const marker = readJSON<ReviewMarker>(markerFile(folder));
+  if (existsSync(marker.journal)) {
+    const journal = readJSON<ReviewJournal>(marker.journal);
+    if (journal.stopped && journal.turn.session === marker.turn.session) {
+      return { finished: true, error: "交付的原生审查已确认停止，下次从已确认状态继续" };
+    }
+  }
   const observe = recover ?? (await import("../herdr-core/task.ts")).recoverTask;
   const result = await observe(marker.turn);
   if (result.state || !result.finished) return { state: result.state ?? "uncertain" };
@@ -88,7 +106,9 @@ const executeReview: Reviewer = async (turn) => {
     });
     if (controller.signal.aborted) {
       const { stopTask } = await import("../herdr-core/task.ts");
-      if (await stopTask(turn, "timeout")) return { error: "审查已中止，Herdr 已确认终端停止" };
+      if (await stopTask(turn, "timeout")) {
+        return { finished: true, error: "审查已中止，Herdr 已确认终端停止" };
+      }
     }
     return result;
   } finally {
@@ -143,7 +163,9 @@ export async function reviewSnapshot(
   const profile = paths.some((path) => matches(path, config.review.xhigh))
     ? config.review.xhighProfile!
     : config.review.profile;
-  const scope = createHash("sha256").update(JSON.stringify([config.repo, main, head, profile, points, diff])).digest("hex");
+  const scope = createHash("sha256")
+    .update(JSON.stringify([config.repo, main, head, profile, points, diff]))
+    .digest("hex");
   const durable = join(storage, scope);
   const durableSnapshot = join(durable, "snapshot");
   const journalFile = join(durable, "review.json");
@@ -174,7 +196,12 @@ export async function reviewSnapshot(
   }
   const marker: ReviewMarker = { journal: journalFile, turn: journal.turn };
   const parentContext = process.env.AGENT_AUTOLOOP_CONTEXT;
-  if (parentContext) saveJSON(markerFile(dirname(parentContext)), marker);
+  if (parentContext) {
+    const parentFolder = dirname(parentContext);
+    // Register before checking the stop fence, so cancellation either observes this child or prevents dispatch.
+    saveJSON(markerFile(parentFolder), marker);
+    if (existsSync(stopFile(parentFolder))) throw new Error("交付已请求停止，不再启动原生审查");
+  }
   const result = await review(journal.turn);
   if (result.state || (!result.finished && !result.error)) {
     console.log(REVIEW_UPDATE + JSON.stringify({ state: result.state ?? "uncertain" }));

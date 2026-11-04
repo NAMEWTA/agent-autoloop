@@ -4,7 +4,7 @@
 
 ## 讨论和反馈
 
-本分支维护地址是 [NAMEWTA/agent-autoloop](https://github.com/NAMEWTA/agent-autoloop)，原项目由 [KKKKhazix](https://github.com/KKKKhazix/agent-autoloop) 开源。本分支当前不依赖 Issues 或 Discussions 功能已开启；可复现的修改通过 PR 说明问题、范围和验证，讨论使用仓库当时实际开放的渠道。
+本分支维护地址是 [NAMEWTA/agent-autoloop](https://github.com/NAMEWTA/agent-autoloop)，原项目由 [KKKKhazix](https://github.com/KKKKhazix/agent-autoloop) 开源。可复现的问题可通过 [Issues](https://github.com/NAMEWTA/agent-autoloop/issues) 跟踪，修改通过 PR 说明问题、范围和验证。不假定 Discussions 已开启，讨论使用仓库实际开放的渠道。
 
 Herdr 改造的需求、设计、故障规则、迁移和验收矩阵集中在 [docs/herdr-core.md](docs/herdr-core.md)。PR 应引用对应边界，写明已验证和仍需本机验收的项目。不要把无法运行的真实 Agent、权限或故障检查写成通过。
 

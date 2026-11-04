@@ -1,7 +1,7 @@
 // The worker: on a machine that nothing can reach, it keeps coming to the hub for work and starts an agent for each
 // job. Each local process writes to files in a detached process group. A persistent adapter must also account for
-// execution outside that group, so losing its observer cannot be mistaken for finished work. A job is saved before anything slow happens; a result is saved before it's handed
-// in and stays until the hub has taken it.
+// execution outside that group, so losing its observer cannot be mistaken for finished work. A job is saved before
+// anything slow happens; a result is saved before it's handed in and stays until the hub has taken it.
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -89,11 +89,11 @@ function save(entry: Entry) {
   renameSync(`${file}.tmp`, file);
 }
 
-/** What the agent's environment gets: never the hub's secrets, and nothing of a session the worker itself may be in. */
+/** The worker removes hub variables; each runtime plugin owns its native session environment. */
 function agentEnvironment(entry: Entry) {
   const env: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(process.env)) {
-    if (/^(AGENT_AUTOLOOP_|CLAUDECODE$|CLAUDE_CODE_|CODEX_(?!HOME$))/.test(name)) continue;
+    if (name.startsWith("AGENT_AUTOLOOP_")) continue;
     env[name] = value;
   }
   return {
@@ -503,10 +503,12 @@ export function createWorker({
     await sayStarted(entry, adapter, seen);
     if (seen.state) pending(entry, seen.state, seen.error);
     else if (entry.persistent && !ended && !completed) {
-      pending(entry, seen.error !== undefined || seen.finished ? "uncertain" : "running",
-        seen.error ?? (seen.finished ? "还没有收到这一轮的完整回执" : undefined));
-    }
-    else {
+      pending(
+        entry,
+        seen.error !== undefined || seen.finished ? "uncertain" : "running",
+        seen.error ?? (seen.finished ? "还没有收到这一轮的完整回执" : undefined),
+      );
+    } else {
       delete entry.state;
       delete entry.recoveryError;
       if (ended) return conclude(entry, adapter, code, seen);

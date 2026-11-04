@@ -2,7 +2,7 @@
 // PR points/config replace main's trusted settings. Only a text snapshot reaches the configured read-only profile.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseReview, reviewSnapshot } from "../plugins/delivery/review.ts";
+import { parseReview, reviewSnapshot, stopReview } from "../plugins/delivery/review.ts";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,6 +77,58 @@ test("review uses main's points and a fresh read-only profile with a text-only s
       /审查没有交回/,
     );
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a confirmed stop before the review marker prevents a later review dispatch", async () => {
+  const root = mkdtempSync(join(tmpdir(), "autoloop-review-stop-"));
+  const previousContext = process.env.AGENT_AUTOLOOP_CONTEXT;
+  try {
+    const repo = join(root, "repo");
+    const folder = join(root, "wrapper");
+    mkdirSync(repo);
+    mkdirSync(folder);
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    const commit = () => {
+      git("add", "-A");
+      git("-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "test");
+      return git("rev-parse", "HEAD");
+    };
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(repo, "AGENTS.md"), "## 审查要点\nDo not execute the PR\n");
+    writeFileSync(join(repo, "app.ts"), "old");
+    const main = commit();
+    writeFileSync(join(repo, "app.ts"), "new");
+    const head = commit();
+    const configuration = settings({
+      repo: "example/app",
+      internal: [],
+      review: { points: "AGENTS.md", profile: "review" },
+    });
+    process.env.AGENT_AUTOLOOP_CONTEXT = join(folder, "context.json");
+    assert.equal(await stopReview(folder, "cancel"), true);
+    let dispatched = false;
+    await assert.rejects(
+      reviewSnapshot(
+        repo,
+        join(root, "snapshot"),
+        main,
+        head,
+        configuration,
+        async () => {
+          dispatched = true;
+          return { finished: true, text: '{"findings":[]}' };
+        },
+        join(root, "reviews"),
+      ),
+      /停止/,
+    );
+    assert.equal(dispatched, false, "a late marker must not escape an already acknowledged stop");
+  } finally {
+    if (previousContext === undefined) delete process.env.AGENT_AUTOLOOP_CONTEXT;
+    else process.env.AGENT_AUTOLOOP_CONTEXT = previousContext;
     rmSync(root, { recursive: true, force: true });
   }
 });

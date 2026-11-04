@@ -47,6 +47,7 @@ const home = process.env.AGENT_AUTOLOOP_HOME ?? join(homedir(), ".agent-autoloop
 const app = resolve(process.env.AGENT_AUTOLOOP_APP ?? join(home, "app"));
 const { runTask, recoverTask } = await import(pathToFileURL(join(app, "plugins/herdr-core/task.ts")).href);
 const session = resume ?? `browser-${randomUUID()}`;
+const parentSession = process.env.AGENT_AUTOLOOP_SESSION || undefined;
 const sessionFolder = join(dirname(resolve(file)), ".handoff", session);
 const journalFile = join(sessionFolder, "session.json");
 const previous = existsSync(journalFile) ? JSON.parse(readFileSync(journalFile, "utf8")) : null;
@@ -61,17 +62,20 @@ if (!pending) {
   mkdirSync(cwd, { recursive: true, mode: 0o700 });
   writeFileSync(contextFile, "{}", { mode: 0o600 });
 }
-const turn = pending ? previous.turn : {
-  prompt,
-  session,
-  resume: resume ?? null,
-  cwd,
-  access: task.access,
-  options: { profile: task.profile },
-  execution: { run: 1, attempt: 1, turn: ordinal },
-  contextFile,
-  folder,
-};
+const turn = pending
+  ? previous.turn
+  : {
+      prompt,
+      session,
+      ...(parentSession ? { parentSession } : {}),
+      resume: resume ?? null,
+      cwd,
+      access: task.access,
+      options: { profile: task.profile },
+      execution: { run: 1, attempt: 1, turn: ordinal },
+      contextFile,
+      folder,
+    };
 function remember(finished: boolean) {
   const temporary = `${journalFile}.${randomUUID()}.tmp`;
   writeFileSync(temporary, JSON.stringify({ turn, finished }), { mode: 0o600 });
@@ -84,9 +88,7 @@ process.once("SIGINT", abort);
 process.once("SIGTERM", abort);
 try {
   // A pending task is observed only. An explicit later continuation may create the next turn after it settles.
-  const result = pending
-    ? await recoverTask(turn)
-    : await runTask(turn, { signal: controller.signal });
+  const result = pending ? await recoverTask(turn) : await runTask(turn, { signal: controller.signal });
   if (result.finished) remember(true);
   if (result.text) console.log(result.text);
   console.log(`[Autoloop 会话：${session}]`);

@@ -9,7 +9,12 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const profileName = process.argv[2];
 assert.ok(profileName, "用法：node scripts/real-agents.ts <本机已验收的 profile>");
-const profiles = JSON.parse(readFileSync(join(process.env.AGENT_AUTOLOOP_HOME ?? join(homedir(), ".agent-autoloop"), "herdr", "profiles.json"), "utf8"));
+const profiles = JSON.parse(
+  readFileSync(
+    join(process.env.AGENT_AUTOLOOP_HOME ?? join(homedir(), ".agent-autoloop"), "herdr", "profiles.json"),
+    "utf8",
+  ),
+);
 const profile = profiles.profiles?.[profileName];
 assert.ok(profile && ["read", "edit", "full"].includes(profile.access), "profile 不存在或 access 不正确");
 const use = "herdr-core";
@@ -84,9 +89,7 @@ try {
   await source.event({ id: "real", type: "test" });
   const waiting = await until((s) => s.cards.some((c: any) => c.kind === "ask"));
   await owner.answer(waiting.cards[0].id, { choice: 1 });
-  const finished = await until((s) =>
-    s.runs.some((r: any) => r.state === "done" && r.summary === "你选了绿色，试跑通过"),
-  );
+  const finished = await until((s) => s.runs.some((r: any) => r.state === "done" && r.summary === "你选了绿色，试跑通过"));
   const runs = finished.runs;
   assert.equal(runs.length, 2);
   assert.equal(runs[0].session, runs[1].session);

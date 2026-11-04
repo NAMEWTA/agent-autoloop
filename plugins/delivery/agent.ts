@@ -15,7 +15,11 @@ export default {
     const lines = stdout.split("\n");
     const updates = lines.flatMap((line) => {
       if (!line.startsWith(REVIEW_UPDATE)) return [];
-      try { return [JSON.parse(line.slice(REVIEW_UPDATE.length))]; } catch { return []; }
+      try {
+        return [JSON.parse(line.slice(REVIEW_UPDATE.length))];
+      } catch {
+        return [];
+      }
     });
     const state = updates.at(-1)?.state;
     if (code === null) return state ? { state } : {};
