@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs Agent 自动化中台: a clone in ~/.agent-autoloop/app, with nothing to build and nothing else to install.
 set -e
-REPO="${AGENT_AUTOLOOP_REPO:-https://github.com/KKKKhazix/agent-autoloop.git}"
+REPO="${AGENT_AUTOLOOP_REPO:-https://github.com/NAMEWTA/agent-autoloop.git}"
 ROOT="${AGENT_AUTOLOOP_HOME:-$HOME/.agent-autoloop}"
 APP="$ROOT/app"
 PROGRAM="$APP/bin/agent-autoloop.ts"

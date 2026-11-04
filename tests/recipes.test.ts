@@ -65,7 +65,7 @@ for (const name of NAMES) {
 
   test(`${name}: the README states the access level the rules actually give`, () => {
     const { agents } = readRules(name);
-    const real = Object.values<{ use: string; access: string }>(agents).filter((agent) => agent.use !== "command");
+    const real = Object.values<{ use: string; access: string }>(agents).filter((agent) => agent.use !== "script");
     assert.equal(real.length, 1);
     const stated = /权限：`(read|edit|full)`/.exec(readDoc(name));
     assert.ok(stated, "README 要写明权限");

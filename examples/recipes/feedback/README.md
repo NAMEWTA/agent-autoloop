@@ -32,3 +32,5 @@ curl --fail-with-body http://127.0.0.1:3350/v1/events \
 规则默认登记 `feishu` 通道。把 `ou_REPLACE_ME` 换成本人的 open_id；在已有 `config.json` 的 `channels.feishu` 配上这个人的 `user` 和已有通道密钥。复用已运行的飞书通道，不另开监听。尚未接入时按[通道配置](../../../skills/agent-autoloop/SKILL.md#接一个通道)完成；配置涉及新密钥或权限时先取得本人授权。
 
 读取业务资料使用本人身份，通知使用机器人身份。默认只发给本人；一个中台会把卡片交给它配置的所有通道，没有按规则单独选择收件人的功能。含私人资料的任务应使用只连本人私聊的中台，不要混入共享群通道。不要把密钥、实际 open_id、表格 token 或业务数据提交到仓库。
+
+AI 任务统一使用 `herdr-core`；在接单电脑配置并验收 `options.profile` 对应的 Herdr profile。原生 CLI 的工具、Skill、浏览器与权限由该 profile 配置；固定采集脚本使用 `script` 插件。

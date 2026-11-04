@@ -36,7 +36,7 @@ const start = Date.parse("2026-11-03T00:00:00Z");
 const config = hub.parseRules(
   JSON.stringify({
     sources: { shop: { name: "商店" } },
-    agents: { helper: { name: "助手", worker: "mac-mini", use: "command", command: ["true"] } },
+    agents: { helper: { name: "助手", worker: "mac-mini", use: "script", command: ["true"] } },
     channels: {},
     rules: [
       {

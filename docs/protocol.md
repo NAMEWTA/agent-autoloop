@@ -2,13 +2,13 @@
 
 整个系统是一个循环，三个口子。
 
-```
-          事件                领活
-  来源 ─────────▶  中台  ◀───────── 接单程序 ── Agent
-                   ▲ │
-              回答 │ │ 卡片
-                   │ ▼
-                  通道 ◀──▶ 你
+```mermaid
+flowchart TD
+  Source[来源] -->|事件| Hub[中台]
+  Worker[接单程序] -->|领取与结果| Hub
+  Worker --> Agent[执行插件]
+  Channel[通道] -->|卡片与回答| Hub
+  User[本人] --> Channel
 ```
 
 **中台的内核不主动连接任何东西。** 来源、接单程序、通道都是它们自己连进来：内核不用知道它们在哪、用什么语言写、是哪家的产品，也不保管它们的凭据；你的电脑不用开放任何端口。协议就是下面这份 HTTP + JSON，写一个新插件只要会发 HTTP 请求。
@@ -33,8 +33,8 @@
 1. **注意力最贵。** 默认安静。没事不说话，能自己做的自己做完，只有规则写明要先问的事、确实需要本人解除的阻塞才打断你。
 2. **一切都是事件。** 外部系统、时间、到期复查、你的决定，走的是同一条路。
 3. **一切都连进来。** 内核没有对外的请求。凭据留在用它的地方，出事的范围也留在那里。
-4. **Agent 就是一个进程。** 给它提示词，它打印最后一条消息。Claude Code、Codex、任何命令行 Agent、一段脚本、一条 CI 流水线都一样，不需要 SDK。要启动远端工作的进程，负责跟到真正做完才退出。
-5. **一轮不等人。** 要问你就结束这一轮，收到回答后再开始处理，尽量接着原来的会话。等你的时候不占进程、不花 Token，重启也不丢。
+4. **执行通过插件。** 接单程序启动插件命令并读取统一结果。AI 统一经 Herdr 管理原生终端，固定程序走 `script`。持久执行的 bridge 退出并不能证明工作结束；插件负责核实原生完成、恢复和停止。
+5. **一轮不等人。** 要问你就提交回执、结束这一轮，收到回答后使用原逻辑会话继续。业务等待不自动发起模型调用；Herdr 和原生进程可以驻留，不能称作零进程或零内存。
 6. **规则才是指令。** 事件决定不了交给谁、在哪个目录、用哪个 Skill、给什么权限，这些只由规则决定。别人写的话不进提示词，只放进标明“是资料”的文件。这挡不住所有提示注入，但把最坏的结果限制在规则给定的范围里。
 
 ## 规则
@@ -45,20 +45,20 @@
   "askFirst": ["删数据", "停服", "花钱", "对外发消息"],  // 只有这几类事 Agent 才先问你
   "sources":  { "shop": { "name": "shop" }, "github": { "name": "GitHub", "adapter": "github" } },
   "agents": {
-    "claude": { "name": "Claude Code", "worker": "mac-mini", "use": "claude", "model": "…", "effort": "high", "access": "edit" },
-    "cursor": { "name": "Cursor", "worker": "mac-mini", "use": "command", "command": ["agent", "-p", "--trust", "{prompt}"] }
+    "developer": { "name": "开发 Agent", "worker": "mac-mini", "use": "herdr-core", "access": "edit", "options": { "profile": "developer" } },
+    "poll": { "name": "固定采集", "worker": "mac-mini", "use": "script", "command": ["/absolute/path/to/poll"] }
   },
   "channels": { "feishu": { "name": "飞书", "answerers": ["ou_xxx"] } },
   "rules": [{
     "name": "处理告警",
     "when": { "source": "shop", "types": ["alert.*"] },   // 或 { "cron": "0 9 * * *" }
-    "to": "claude", "cwd": "~/code/shop", "skill": "run-ops", "prompt": "按其中……一节处理。",
+    "to": "developer", "cwd": "~/code/shop", "skill": "run-ops", "prompt": "按其中……一节处理。",
     "group": "ops",                                        // 同一组一次一轮，默认就是规则名
     "parallel": 3,                                         // 写了就按对象分事项：同一对象一次一轮，这一组最多 3 轮
     "tell": "needed",                                      // always 每次 / needed 只在有卡片时（默认）/ never 不推送
     "emits": { "source": "shop", "types": ["pr.*"] }      // 回执里能发什么事件，不写就不能发
   }],
-  "elsewhere": [{ "name": "每周清理", "source": "shop", "to": "claude", "cron": "0 6 * * 0", "where": "Claude 应用的定时任务" }]
+  "elsewhere": [{ "name": "每周清理", "source": "shop", "to": "developer", "cron": "0 6 * * 0", "where": "已有应用的定时任务" }]
 }
 ```
 
@@ -103,15 +103,16 @@ GET /v1/work?claim=<这次领活的编号>&wait=50&running=7,8&capacity=1    Aut
 
 - 没活时最多等 `wait` 秒，新活一来立即返回。`running` 是手上在跑的，同时也是心跳。`capacity=0` 只报到、不领活。
 - 响应丢了，用同一个 `claim` 再来一次，拿回的是同一份活。
-- `cancel` 是要停掉的。接单程序先向整个进程组发停止信号，10 秒后仍有进程运行就强制结束；确认组内没有活进程后才交 `outcome: "cancelled"`，这个事项才放开。停止期间重启接单程序也继续这一步。
+- `cancel` 是要停掉的。固定程序先停止整个进程组，10 秒后仍存活才强制结束。持久插件另外通过 `stop(turn, reason)` 核实外部原生执行已结束；只杀 bridge 不算停止。确认后才交 `outcome: "cancelled"`。停止期间重启接单程序也继续核实。
+- 不能证明在正常执行的任务不再放入 `running`，但接单程序本身继续在线。既有租约到期后内核标为 `unknown`；恢复观察仍使用原执行和 token，不能把未知当成失败重派。
 
 ```jsonc
 // Job：一轮的全部。token 只对这一轮的这一次执行有效。
 {
   "run": 12, "token": "…", "attempt": 1,
   "rule": { "name": "处理告警", "cwd": "~/code/shop", "skill": "run-ops", "prompt": "按其中……处理。" },
-  "agent": { "id": "claude", "name": "Claude Code", "use": "claude", "model": "…", "effort": "high", "access": "edit" },
-  "session": null,       // 尽量接着的会话：重派时是上一次的，回答来了是提问那一轮的。接不上就开新的，所以它只是优化
+  "agent": { "id": "developer", "name": "开发 Agent", "use": "herdr-core", "access": "edit", "options": { "profile": "developer" } },
+  "session": null,       // 逻辑会话：回答继承提问那一轮的；持久插件不能用新终端冒充丢失的原会话
   "askFirst": ["删数据", "…"],
   "context": {           // 接单程序把它写成文件交给 Agent，都是资料
     "events":  [{ "id", "source", "sourceName", "type", "subject", "summary", "detail", "link", "receivedAt" }],
@@ -125,7 +126,7 @@ GET /v1/work?claim=<这次领活的编号>&wait=50&running=7,8&capacity=1    Aut
 ```
 
 ```
-POST /v1/runs/12/started   Authorization: Bearer <token>   { "session": "…", "link": "claude://…" }
+POST /v1/runs/12/started   Authorization: Bearer <token>   { "session": "…" }
 POST /v1/runs/12/result    Authorization: Bearer <token>   Result
 → 200 { "rejected": [{ "card": 9, "reason": "不在本轮核对范围" }] }
 ```
@@ -156,7 +157,7 @@ POST /v1/runs/12/result    Authorization: Bearer <token>   Result
 
 ### Agent 只需要做一件事
 
-接单程序把提示词交给 Agent，Agent 的最后一条消息就是回执：
+接单程序把提示词交给 Agent，业务回执仍是最后一条完整回复：
 
 ````
 第一行一句话结论。可自动重试的临时失败写「没跑成：原因」，需要本人恢复的阻塞写「待你处理：原因」并交 ask，没事可做写「没事可做：原因」。其余结束本轮，事项由回执继续跟进。
@@ -166,31 +167,29 @@ POST /v1/runs/12/result    Authorization: Bearer <token>   Result
 ```
 ````
 
-代码块可有可无。Agent 不需要装任何东西、不需要连中台，所以沙箱里的、云端的 Agent 也能接。
+代码块可有可无。Herdr 原生 Agent 必须按本轮提示词生成 `{ "text": "完整回复" }` 文件，并调用指定的本地回执提交器；插件验证本轮身份、nonce、明确回执与原生本轮完成状态后，才把文字交给接单程序。终端画面不是回执。原生 Agent 不需要中台凭据，也不直接连中台。固定程序按插件接口交回文字。
 
-回执写错不重做业务：接单程序接着原会话，只让它把最后一条消息重写一遍，最多两次。还是读不懂，或重写进程启动失败、报错、超时、没有输出，就保留原业务消息第一行的结局，回执作废，推一张卡片告诉你原文在哪；补回执失败不会把已完成的业务变成自动重试。
+回执写错不重做业务：接单程序接着原会话，只让它把最后一条消息重写一遍，最多两次。还是读不懂，或重写进程启动失败、报错、超时、没有输出，就保留原业务消息第一行的结局，回执作废，推一张卡片告诉你原文在哪；补回执失败不会把已完成的业务变成自动重试。持久插件的修复使用新的执行子轮和回执位置，只允许改结果文字与使用本轮提交器，不重复业务操作。
 
 ### 接一个新 Agent
 
-规则里写一行，任何能打印最后一条消息的命令都行，退出码不是 0 就算没跑成：
+本机配置 Herdr template 和 profile，再在规则中登记：
 
 ```json
-{ "name": "Hermes", "worker": "mac-mini", "use": "command", "command": ["hermes", "chat", "-Q", "-q", "{prompt}"] }
+{
+  "name": "开发 Agent",
+  "worker": "mac-mini",
+  "use": "herdr-core",
+  "access": "edit",
+  "options": { "profile": "developer" }
+}
 ```
 
-想要会话接续、打开会话的链接、用量统计，就在 `plugins/<名字>/agent.ts` 写一个文件（见 `plugins/claude/agent.ts`）：
+原生命令、模型、工具和权限留在可信 template。profile 的 `access` 与规则必须完全一致，但字符串本身不提供系统沙箱。固定采集程序使用 `script`，不接受模型提示词或原生会话占位符。
 
-```ts
-export default {
-  command: (run) => [...],                                // 这一轮的命令行，run.resume 是要接着的会话
-  read: (output) => ({ text, session, usage, finished }), // 从输出里读出最后一条消息和会话
-  link: (session) => "…",                                 // 可选：打开这个会话的链接
-};
-```
+插件仍导出 `command(turn)` 和 `read(stdout, code, stderr)`。持久执行另声明 `capabilities.persistent`，并实现只读的 `recover(turn)`、核实真正停止的 `stop(turn, reason)`；`capabilities.resume` 与可选的会话链接是不同能力。接单程序提供稳定的 `execution: { run, attempt, turn }`。完整接口见[写插件](plugins.md)，Herdr 的身份映射、状态和迁移见 [Herdr 接入](herdr-core.md)。
 
-专用插件的 `access` 三档，翻译成各自 CLI 的权限：`read` 只读，`edit` 只改工作目录（默认），`full` 完整权限、不审批。只读不等于读不到密钥，要隔离密钥请用系统账号或容器。`command` 只传命令参数，不替任意程序限制权限。
-
-浏览器由 Agent 的运行环境提供。Codex 使用后台 `codex exec`，不能假定桌面应用的浏览器连接自动可用；使用该轮实际可用的浏览器工具，或规则、Skill 明确配置的入口。入口只处理网页步骤并接续自己的会话，业务和回执仍由主任务负责。中台不附带浏览器桥接，不安装或授权浏览器工具；接入验收见[插件说明](plugins.md#浏览器接入)。
+浏览器工具由实际 Herdr template 的原生环境提供，中台不附带浏览器驱动或登录授权。[浏览器交接模板](../examples/recipes/browser-handoff/README.md)通过同一个任务接口委托网页步骤，并为子任务分配独立 session 和 cwd；业务和中台回执仍由主任务负责。
 
 ## 通道：把卡片送到你面前
 
@@ -240,10 +239,10 @@ POST /v1/runs/12/cancel     {}
 | 交结果的响应丢了 | 重放得到同样的确认 |
 | Agent 没跑成 | 5 分钟后重派，每次翻倍，最长 1 小时；期间来的同一事项的事件并进这一轮；连续第 3 次告诉你 |
 | 需要本人恢复浏览器连接、登录或验证 | 本轮结束，保留已完成业务和待验收项，用问题卡片等回答，不自动重派 |
-| 原会话接不上 | 开新会话，靠资料文件接着干 |
+| Herdr 原会话接不上 | 保持不确定；核对原终端，不自动新建或重放 |
 | 回执写错 | 只重写回执，不重做业务 |
 | 接单程序重启 | 在跑的 Agent 不受影响，回来接着盯 |
-| 接单程序在线，但 5 分钟没报手上的某一轮 | 标成“不确定”，放开这一组，告诉你；它后来交的结果照样收 |
+| 接单程序在线，但 5 分钟没报手上的某一轮 | 标成“不确定”，放开内核这一组，告诉你；同 token 的晚到结果仍可提交。插件继续保留未知执行的 session/cwd 占用 |
 | 接单程序整台不见了 | 活留着不放开，10 分钟后告诉你一次，回来后这张卡片自动收尾 |
 | 中台重启 | 全在 SQLite 里，大家自动重连 |
 | 定时错过了 | 醒来只补最近一次 |
@@ -251,7 +250,7 @@ POST /v1/runs/12/cancel     {}
 | 提问之后问题自己好了 | 后面的 Agent 核实后在 `resolve` 里结掉，卡片自动改成“不用决定了” |
 | 规则写错了 | 旧规则继续跑，告诉你错在哪 |
 
-这是“至少一次”的系统：Agent 可能被叫两次，所以 Skill 里有副作用的动作要先核实当前状态。
+这是“至少一次”的系统：明确失败后的新尝试仍可能遇到已经发生的外部副作用，所以 Skill 必须先核实当前状态。持久插件不会重发结果不明的投递，也不能保证外部操作与本机记录恰好同时成功。`unknown` 由租约产生，HTTP `Result.outcome` 不接受该值。
 
 ## 谁能做什么
 
@@ -296,11 +295,7 @@ Node 请求转换层保持在 50 行内；文件、SQLite 连接、监听和定�
 
 模拟的正确性检查必须通过；模拟速度只是开发效率的观察指标。性能检查使用逐条 HTTP 写入，事务落盘后才应答。空闲 RSS 和千连接负载 RSS 分开测；检查实现见 `scripts/metrics.ts`，实测数字见 README。大历史量（结果见[历史增长实测](#历史增长实测)）用 `node scripts/history.ts 1000 10000 100000` 验证真实业务、HTTP 响应、慢速日志订阅、强杀重试和完整重建；每个场景含两轮任务、提问、投递、回答和定时复查，逐笔 WAL + FULL 提交。请求走真实 HTTP，每类操作测 30 次取中位数，状态汇总测一次；持续写入、空闲及请求负载内存分别报告，不手动触发 GC。
 
-### ACP 和 MCP
-
-`use: "acp"` 配合 `command: ["某个 ACP 程序", "启动参数"]` 使用 stdio ACP v1。桥接先初始化，再新建或加载会话；加载时重放的历史不算这一轮的回复，思考和工具输出不进回执。只有 `end_turn` 且有最后一条文字消息才算完成。会话编号交给中台保存。没有声明文件读写、终端或交互登录能力，Agent 用自己的工具；需要登录时先用它自己的命令行登录。
-
-权限只选一次性的选项：`read` 允许结构化的读和搜索，`edit` 再允许工作目录内的编辑（核对符号链接），`full` 允许其他操作。未提供相应选项就取消。权限依赖 Agent 遵守 ACP，不提供额外的系统隔离。核对依据：[初始化](https://agentclientprotocol.com/protocol/v1/initialization)、[会话](https://agentclientprotocol.com/protocol/v1/session-setup)、[工具权限](https://agentclientprotocol.com/protocol/v1/tool-calls)。
+### MCP
 
 `agent-autoloop mcp` 提供 stdio MCP，固定支持 [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle) 版，不支持 2026-07-28 的无握手协议。工具为 `status`、`why`、`answer`、`resolve`、`stop`、`emit`、`tell`；按本机已有的本人或来源密钥展示工具。它调用同样的 HTTP 接口，不直接改数据库；密钥留在本机 `config.json`。MCP 客户端把程序设为 `node`，参数设为引擎的绝对路径 `bin/agent-autoloop.ts` 和 `mcp`，环境里指定 `AGENT_AUTOLOOP_HOME`。标准输出只写 JSON-RPC。
 
@@ -314,11 +309,11 @@ Webhook 通道的 `config.json` 配置使用 `use: "webhook"`、`url` 和 `platf
 
 ## 业务场景模板
 
-`examples/recipes/` 提供七套场景。反馈处理、网站巡检和飞书周报与业务摘要默认使用飞书本人私聊与 `Asia/Shanghai`；都是现有规则、通道和 `command` 的组合，没有增加协议字段或内核产品知识。
+`examples/recipes/` 提供七套场景。反馈处理、网站巡检和飞书周报与业务摘要默认使用飞书本人私聊与 `Asia/Shanghai`；都是规则、通道、Herdr profiles 和固定 `script` 的组合，不向内核增加产品知识。
 
 反馈来源只负责唤醒同一事项，当前业务状态和授权从可信接口重新读取。网站检查以本规则未关闭的异常通知卡片作为故障记录：首次失败发通知及排查事件，持续失败安静，恢复结案并发恢复事件；手动关闭未恢复卡片后仍失败会重新报告。飞书采集完整读取后写私有快照并发事件，摘要核对快照编号，旧事件不使用新资料；采集与摘要同组串行。只有本人身份可读的数据参与汇总，不把不可见当成未提交。
 
-浏览器交接模板是主任务对已安装入口的参数调用，不新增协议或浏览器驱动。可信配置固定命令、目标与允许操作，续办使用入口实际返回的 Codex 会话编号；网页内容和外部事件不能改这些范围。连接、登录或验证受阻时由主任务 `ask` 并结束本轮，回答后只继续剩余网页步骤，浏览器助手不再次委派或独立结案。
+浏览器交接模板通过安装目录中的 Herdr 任务接口调用网页助手，不新增协议或浏览器驱动。可信配置固定 profile、目标与允许操作，续办使用本模板持久化的 Autoloop 逻辑 session；网页内容不能改范围。主任务和子任务的 cwd 分开；未知结果只核实，不再发送。主任务能够正常结束但需要本人恢复连接时交 `ask`；原生 CLI 审批阻塞需核实终端。网页助手不再次委派或独立结案。
 
 反馈、巡检和飞书摘要的脚本使用本地假 HTTP 和假飞书 CLI 验证，不调用真实业务数据、不发真消息。公开样例不含内部地址、账号或业务记录；用户替换后的资料不应提交到仓库。结构与通道职责未变，架构图沿用现有三口协议。
 
@@ -331,7 +326,7 @@ Webhook 通道的 `config.json` 配置使用 `use: "webhook"`、`url` 和 `platf
 | `kernel/` | 确定性决策、演进、日志、到期、规则匹配、请求处理、卡片表单 |
 | `host/` | Node HTTP、文件与 SQLite 连接、时钟、配置、后台服务和插件加载 |
 | `protocol/` | 类型、JSON Schema、输入校验、HTTP 客户端与一致性检查 |
-| `worker/` | 接单、Agent 进程、心跳与停止、回执读取和提交 |
+| `worker/` | 接单、桥接进程、持久执行核实、心跳与停止、回执读取和提交 |
 | `cli/`、`bin/` | 用户命令、MCP 与命令行启动入口 |
 | `plugins/` | Agent、事件、通道和交付插件，统一发现入口 |
 | `examples/recipes/` | 完整场景的规则、任务 Skill 与启用说明 |
@@ -356,6 +351,8 @@ Webhook 通道的 `config.json` 配置使用 `use: "webhook"`、`url` 和 `platf
 
 这些是在 Apple M5 Pro 上的本地检查，不代表服务器容量。Node 24.21.0 的原基线也会超过 60 MB，空闲内存预算按实测峰值 60.394 MB 取到 60.4 MB；不通过改变采样时间或主动触发 GC 降低读数。最新实测、机器、完整复现命令在 README。日志只追加，不压缩，磁盘占用仍随历史增长。常驻内存不保存全部历史，待处理工作及返回结果仍会占用内存；统计总量仍需遍历数据库索引。没有总览页、工作流画布、Agent 记忆、模型路由、多租户或插件市场。
 
+以上预算与下列历史实测只覆盖中台本身，排除 Herdr、原生 Agent 和工具的资源。持久终端的数量、模型上下文和工具决定额外开销，需要按实际部署另测。
+
 ### 历史增长实测
 
 Apple M5 Pro、24 GB、Node 24.21.0，用 `node scripts/history.ts 1000 10000 100000` 复现：
@@ -374,16 +371,16 @@ Apple M5 Pro、24 GB、Node 24.21.0，用 `node scripts/history.ts 1000 10000 10
 
 ## 交付插件
 
-交付是 `plugins/delivery` 的普通 Agent 进程，内核不认识它。项目仍用 `ops/delivery.json`，标签仍是 `deliver`、`deliver-attended`、`deliver-review`、`ask-owner`，提交状态仍为 `delivery`。审查状态默认 `agent-review`，由 `review.status` 修改；命令由 `review.command` 修改。设置格式、规则与 Ship 示例见[配置手册](../skills/agent-autoloop/SKILL.md#交付流水线)。
+交付是 `plugins/delivery` 的普通 Agent 进程，内核不认识它。项目仍用 `ops/delivery.json`，标签仍是 `deliver`、`deliver-attended`、`deliver-review`、`ask-owner`，提交状态仍为 `delivery`。审查状态默认 `agent-review`，由 `review.status` 修改；AI 审查由必填的 `review.profile` 选择本机只读 Herdr profile，非空 `review.xhigh` 通过 `review.xhighProfile` 切换更深审查。设置格式、规则与 Ship 示例见[配置手册](../skills/agent-autoloop/SKILL.md#交付流水线)。
 
-来源只给事件，仓库与执行命令由中台规则固定。内置 `poll.ts` 读取待处理标签，以“仓库、事项、标签记录、当前提交”生成稳定事件编号，不另存游标。无标签、关闭且未合并、fork 或非 main 目标不启动交付。每个 PR 一个事项，并发由规则 `parallel` 和接单程序容量控制；进程失败使用中台的 5 分钟起重试和连续失败通知，不另建队列、槽位、失败计数或通知服务。
+来源只给事件，仓库由中台规则固定，审查 profile 与要求由项目 main 固定。内置 `poll.ts` 读取待处理标签，以“仓库、事项、标签记录、当前提交”生成稳定事件编号，不另存游标。无标签、关闭且未合并、fork 或非 main 目标不启动交付。每个 PR 一个事项，并发由规则 `parallel` 和接单程序容量控制；已确认的执行失败使用中台的 5 分钟起重试和连续失败通知，不另建队列、槽位、失败计数或通知服务。Herdr 子审查结果不明时，外层也保留不确定，不伪装成失败重派；相同 main/head/profile/要求/diff 恢复同一持久子任务，确认原生停止后才可用新代次。
 
 | 步骤 | 必须满足 |
 |---|---|
 | 读取设置 | 用本轮 main 的固定提交读项目设置和审查要点，不读 PR 里的版本 |
 | 同步 | PR 已包含 main；缺少时请求 GitHub 同步后结束这一轮，由中台重试 |
 | 审查 | 裸 Git 对象转文字差异；只审分支自己的提交，排除干净合入 main 的变化，保留冲突解决；普通内部文档可略过模型 |
-| 审查进程 | 不检出 PR，不执行其中的代码、测试、设置或 hooks；默认 Codex 忽略用户配置和记忆，只读独立快照 |
+| 审查进程 | 不检出 PR，不执行其中的代码、测试、设置或 hooks；Herdr 子任务只收到 main 要求和独立文字快照，profile 的真实只读边界需单独验收 |
 | 完整检查 | 草稿先转 ready；只接受当前提交最新一次 pull_request 工作流和指定 job 都完成且成功，草稿或 skipped job 不算 |
 | 合并 | 再读 PR head、main 和标签；变化就重来；检查通过后才写可配置的审查状态，按已审查 SHA 合并 |
 | 自动合并与响应丢失 | 先关闭已有自动合并并读回确认；合并响应丢失先看是否已经合并，不盲目再提交；清标签失败也读回确认是否已移除 |

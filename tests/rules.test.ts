@@ -139,6 +139,15 @@ test("types match exactly, by prefix or all", () => {
   assert.ok(typeMatches(["*"], "anything"));
 });
 
+test("plugin options are opaque objects and script rules still require fixed argv", () => {
+  const r = good();
+  r.agents.a1.use = "herdr-core";
+  r.agents.a1.options = { profile: "developer", limits: { turns: 2 } };
+  assert.deepEqual(parseRules(JSON.stringify(r)).agents.a1.options, r.agents.a1.options);
+  problem((r) => { r.agents.a1.options = []; }, /Agent a1.*options/);
+  problem((r) => { r.agents.a1.options = null; }, /Agent a1.*options/);
+});
+
 test("a null rule is a rules error and leaves the running configuration intact", () => {
   problem((r) => {
     r.rules = [null];

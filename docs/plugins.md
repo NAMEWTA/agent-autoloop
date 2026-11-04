@@ -29,11 +29,17 @@ node --disable-warning=ExperimentalWarning --test --test-name-pattern='agent-aut
 | 导出对象的方法 | 作用 |
 |---|---|
 | `command(turn)` | 返回命令参数数组；参数不作为 shell 代码执行 |
-| `read(stdout, code, stderr)` | 返回 `text`、`session`、`usage`、`error`、`finished`；运行中 `code` 为 `null` |
-| `link(session)` | 可选，会话链接；支持会话的插件可只重写错误回执 |
-| `check()` | 可选，能用返回 `null`，否则返回下一步怎么做 |
+| `read(stdout, code, stderr)` | 返回 `text`、`session`、`usage`、`error`、`finished` 或待核实的 `state`；运行中 `code` 为 `null` |
+| `capabilities` | 声明 `resume` 和 `persistent`；会话链接不等于续接能力 |
+| `recover(turn)` | 持久插件恢复观察同一次执行；不能投递、重发或新建会话 |
+| `stop(turn, reason)` | 确认实际执行停止后才返回 `true`；只杀 bridge 不够 |
+| `link(session)` | 可选，仅真实可打开的会话 URL，不放命令字符串 |
+| `check(options)` | 可选，本机配置可用返回 `null`，否则给出下一步 |
+| `control(args)` | 可选，插件管理命令；由通用 `agent-autoloop plugin <名字> …` 入口调用 |
 
-`turn` 包含 `prompt`、`session`、`resume`、`cwd`、`access`、`model`、`effort`、`command`、`contextFile`、`folder`。`contextFile` 是资料文件，受限 CLI 需要允许读取 `folder`。`read` 要能处理未写完的输出；CLI 真正完成后才返回 `text`。
+`turn` 包含 `prompt`、`session`、`resume`、`cwd`、`access`、`options`、`execution`、`contextFile`、`folder`，以及固定程序使用的 `command`。`execution` 是稳定的 `{ run, attempt, turn }`，每次明确调用或修复的身份不同。`contextFile` 是资料；持久运行时要为每轮刷新副本，不能让旧环境变量继续指向上一轮。
+
+`read` 要能处理未写完的输出。持久插件用 `state: "running"` 表示已核实的在执行，用 `state: "uncertain"` 表示结果不明；即使 bridge 已退出，也不能把后者当成可重试失败。接单程序保持在线，停止为无法证明在执行的任务续租，并通过 `recover` 只读核实。真正完成才返回 `finished: true` 和最终文字。
 
 在规则里选择这个插件：
 
@@ -41,17 +47,17 @@ node --disable-warning=ExperimentalWarning --test --test-name-pattern='agent-aut
 { "name": "Hello", "worker": "my-computer", "use": "hello-agent", "access": "read" }
 ```
 
-只需要打印最后一条消息时，用内置 `command` 加参数数组即可，不必写插件。
+AI 执行统一使用内置 `herdr-core`。在可信规则中选 `options.profile`，原生程序与权限配置在本机 Herdr template。完整的 profiles、身份、回执与迁移说明见 [Herdr 接入](herdr-core.md)。确定性的固定采集程序使用 `script` 的 `command` 数组；它不接受提示词、模型或会话占位符，也不是另一个 AI 执行入口。
 
 ### 浏览器接入
 
-浏览器工具装在运行 Agent 的电脑上，由该 CLI 的工具配置或项目 Skill 提供。Codex 插件启动的是后台 [`codex exec`](https://developers.openai.com/codex/noninteractive/)；可以使用它已配置的 [MCP 工具](https://developers.openai.com/codex/mcp/)，不能只凭桌面应用能打开网页就认定后台也能访问同一浏览器。
+浏览器工具装在运行原生 Agent 的电脑上，由 Herdr template 选择的原生工具配置提供。先用实际 template 验证目标页面、本人账号和第二轮会话；桌面应用能访问某个浏览器，并不证明这个终端也有相同的连接。
 
-Claude 委托 Codex 的完整规则、Skill 和参数调用脚本见[浏览器交接模板](../examples/recipes/browser-handoff/README.md)。入口命令、目标与允许操作由本人配置；网页助手返回证据和会话编号，主任务负责业务与回执。
+完整规则、Skill 和调用脚本见[浏览器交接模板](../examples/recipes/browser-handoff/README.md)。目标、profile、允许操作来自可信配置。网页助手调用同一个 `runTask / recoverTask`，返回证据和 Autoloop 逻辑 session；主任务负责业务决定与中台回执。
 
-已有专用浏览器入口时，在规则的 `prompt` 或 `skill` 写明实际命令、会话接续方式和允许的操作。只交网页步骤，返回看到的内容、操作结果和阻塞原因；主任务负责业务和中台回执。浏览器入口不是必装组件，中台不捆绑某台电脑的脚本，也不自动修改 CLI 的工具配置。
+主任务和网页助手使用不同 cwd。父任务仍持有自己的目录占用时，子任务不能再申请同一目录。模板使用每个子会话独立的工作目录，未知结果时只核实原请求，不重发网页操作。
 
-需要网页验收的任务，要用同一后台启动方式实际打开目标页面，核对内容并接续一次会话。缺少可用入口或需要本人恢复连接、登录、验证时，保留未验收项，用现有 `ask` 等待恢复；不要写“没跑成”触发重派，也不能把 HTTP 查询当作已经完成网页验收。
+中台不捆绑浏览器驱动、不自动修改工具配置。原生 Agent 能正常结束本轮、但业务需要本人恢复连接、登录或验证时，保留未验收项，用 `ask` 等待；原生 CLI 自身卡在审批界面时，插件不能伪造 `ask`，需先查看对应终端。不能把 HTTP 查询当成已经完成网页验收。
 
 ## 通道插件
 
@@ -96,16 +102,17 @@ Claude 委托 Codex 的完整规则、Skill 和参数调用脚本见[浏览器�
 
 ## access 实际能做什么
 
-`access` 由插件翻译，不是中台提供的系统沙箱。以下是未额外放宽本机权限时的行为。
+`access` 是可信规则中的策略声明，不是中台提供的系统沙箱。Herdr profile 的 `access` 必须与规则完全相同，原生工具的实际限制由管理者在 template 及系统隔离中配置。
 
-| 插件 | `read` | `edit` | `full` |
-|---|---|---|---|
-| Codex | `read-only`：能跑 shell，不能写文件，命令默认不能联网 | `workspace-write`：能跑 shell、写工作目录和临时目录，命令默认不能联网 | `danger-full-access`：能写文件、跑 shell、联网，无审批 |
-| Claude Code | `plan`：能读文件和运行只读命令；其他命令取决于自动审批及本机规则 | `acceptEdits`：再允许目录内文件编辑和常见文件操作；任意 shell 或联网仍需放行 | `bypassPermissions`：跳过工具审批，没有额外系统隔离 |
+| 声明 | 必须为实际 template 验证的边界 |
+|---|---|
+| `read` | 只读业务资料；仅给本轮回执文件及指定提交器必要权限 |
+| `edit` | 允许在所选工作目录完成任务；核实目录外写入和网络能力 |
+| `full` | 明确选择的更宽权限；中台不会额外提供沙箱 |
 
-Codex 的三个档位已用插件命令实跑；Claude Code 依据[官方权限说明](https://code.claude.com/docs/en/permission-modes)整理，没有调用模型实跑。Codex 的命令网络限制与托管搜索、MCP 不是同一个边界，详见[官方沙箱说明](https://learn.chatgpt.com/docs/agent-approvals-security)。用户的 CLI 配置可能改变上述能力；`read` 也不代表读不到本机密钥。
+只读不等于读不到本机密钥。要隔离密钥，用单独系统账号或容器，并实测原生 CLI 的工具边界。profile 字段相同并不能证明不同原生工具有相同权限，也不能把未经验证的 template 标成安全。
 
-场景模板据此选权限：早报用 `edit` 写本地文件，issue 用 `edit` 改代码并让固定脚本联网取正文，告警用 `read` 看代码和事件附带的调用栈。反馈处理和飞书摘要用 `edit`，网站排查用 `read`；固定巡检与飞书读取脚本负责联网，摘要 Agent 只读完整快照。`command` 和固定脚本以本机账号运行，不受 `access` 约束。
+场景模板据业务需要声明权限：早报、代码修改、反馈和摘要使用 `edit`；告警、网站排查、网页核实与交付审查使用 `read`。固定巡检和资料读取脚本负责确定性采集。`script`、交付的确定性外部步骤及第三方插件代码以本机账号运行，不受 `access` 字符串约束。
 
 ## 一致性测试
 

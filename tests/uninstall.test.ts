@@ -78,7 +78,7 @@ function install() {
       timeout: 30_000,
       stdio: ["ignore", "pipe", "pipe"],
     });
-  const set = run(["init", "--no-service", "--command", "true", "--port", "3999"]);
+  const set = run(["init", "--no-service", "--script", "true", "--port", "3999"]);
   assert.equal(set.status, 0, set.stderr);
   symlinkSync(program, join(person, ".local", "bin", "agent-autoloop"));
   symlinkSync(program, join(elsewhere, "agent-autoloop"));

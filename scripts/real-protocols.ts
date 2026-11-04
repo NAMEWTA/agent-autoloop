@@ -1,126 +1,67 @@
-// Failure modes: an ACP adapter cannot restore its session; a real MCP client cannot negotiate or call a hub tool;
-// a smoke test writes to the normal hub home or leaves its database/server behind.
+// Exercise the actual MCP process against a real temporary hub. No provider-specific CLI is involved.
+// Failures: initialization or a tool call cannot cross stdio/HTTP; the test leaks a process or normal-home data.
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir, cpus } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-const mode = process.argv[2];
-assert.ok(["acp", "mcp"].includes(mode));
-const home = mkdtempSync(join(tmpdir(), `agent-autoloop-real-${mode}-`));
-const start = Date.now();
+
+assert.equal(process.argv[2], "mcp", "用法：node scripts/real-protocols.ts mcp；AI 接入请跑 real-agents.ts <profile>");
+const home = mkdtempSync(join(tmpdir(), "agent-autoloop-real-mcp-"));
+const started = Date.now();
 process.env.AGENT_AUTOLOOP_HOME = home;
 process.env.AGENT_AUTOLOOP_RULES = join(home, "rules.json");
-const execute = (program: string, args: string[], env = process.env) =>
-  new Promise<string>((resolve, reject) => {
-    execFile(program, args, { cwd: home, env, timeout: 180000, maxBuffer: 8 * 1024 * 1024 }, (error, out, err) =>
-      error ? reject(new Error(err || error.message)) : resolve(out),
-    ).stdin!.end();
-  });
-let server: any;
-let hub: any;
+writeFileSync(process.env.AGENT_AUTOLOOP_RULES, JSON.stringify({ sources: {}, agents: {}, channels: {}, rules: [] }));
+const hub = await import("../host/runtime.ts");
+const { serve } = await import("../host/http.ts");
+const server = serve(0);
+await once(server, "listening");
+let calls = 0;
+server.on("request", (req) => {
+  if (req.url === "/v1/state") calls++;
+});
+
 try {
-  if (mode === "acp") {
-    assert.ok(process.argv[3], "acp 后面写 ACP 服务程序的绝对路径");
-    const env = {
-      ...process.env,
-      INITIAL_AGENT_MODE: "read-only",
-      NO_BROWSER: "1",
-      CODEX_CONFIG: JSON.stringify({ model: "gpt-6.1-sol", model_reasoning_effort: "low", approval_policy: "never" }),
-    };
-    let session: string | null = null;
-    for (let n = 0; n < 2; n++) {
-      const out = await execute(
-        process.execPath,
-        [
-          join(import.meta.dirname, "../plugins/acp/bridge.ts"),
-          JSON.stringify({
-            cwd: home,
-            access: "read",
-            prompt: n
-              ? "只回复上一轮约定的四位数字，不调用工具。"
-              : "记住四位数字 7391。只回复这四位数字，不调用工具。",
-            resume: session,
-            command: [process.argv[3]],
-          }),
-        ],
-        env,
-      );
-      const final = out
-        .trim()
-        .split("\n")
-        .map((l) => JSON.parse(l))
-        .at(-1);
-      assert.equal(final.finished, true);
-      assert.ok(final.text.includes("7391"));
-      if (session) assert.equal(final.session, session);
-      session = final.session;
-    }
-    console.log(
-      JSON.stringify({ agent: "ACP Codex", turns: 2, resumed: true, machine: cpus()[0].model, ms: Date.now() - start }),
+  writeFileSync(
+    join(home, "config.json"),
+    JSON.stringify({
+      url: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+      owner: hub.addKey("owner", "smoke"),
+    }),
+    { mode: 0o600 },
+  );
+  const requests = [
+    {
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "smoke", version: "1" } },
+    },
+    { method: "notifications/initialized" },
+    { id: 2, method: "tools/list" },
+    { id: 3, method: "tools/call", params: { name: "status", arguments: {} } },
+  ];
+  const stdout = await new Promise<string>((resolve, reject) => {
+    const child = execFile(
+      process.execPath,
+      [join(import.meta.dirname, "../bin/agent-autoloop.ts"), "mcp"],
+      { cwd: home, env: process.env, timeout: 20_000, maxBuffer: 1024 * 1024 },
+      (error, output, stderr) => (error ? reject(new Error(stderr || error.message)) : resolve(output)),
     );
-  } else {
-    writeFileSync(
-      process.env.AGENT_AUTOLOOP_RULES,
-      JSON.stringify({ sources: {}, agents: {}, channels: {}, rules: [] }),
-    );
-    hub = await import("../host/runtime.ts");
-    const { serve } = await import("../host/http.ts");
-    server = serve(0);
-    await once(server, "listening");
-    let calls = 0;
-    server.on("request", (req: any) => {
-      if (req.url === "/v1/state") calls++;
-    });
-    writeFileSync(
-      join(home, "config.json"),
-      JSON.stringify({ url: `http://127.0.0.1:${server.address().port}`, owner: hub.addKey("owner", "smoke") }),
-    );
-    const { findProgram } = await import("../worker/agents.ts");
-    const codex = findProgram("codex", () => [
-      "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
-    ]);
-    const out = await execute(codex, [
-      "exec",
-      "--ignore-user-config",
-      "--ephemeral",
-      "--disable",
-      "memories",
-      "--skip-git-repo-check",
-      "--sandbox",
-      "read-only",
-      "-m",
-      "gpt-6.1-sol",
-      "-c",
-      'model_reasoning_effort="low"',
-      "-c",
-      'approval_policy="never"',
-      "-c",
-      `mcp_servers.agent_autoloop.command=${JSON.stringify(process.execPath)}`,
-      "-c",
-      `mcp_servers.agent_autoloop.args=${JSON.stringify([join(import.meta.dirname, "../bin/agent-autoloop.ts"), "mcp"])}`,
-      "-c",
-      `mcp_servers.agent_autoloop.env={AGENT_AUTOLOOP_HOME=${JSON.stringify(home)}}`,
-      "必须调用 agent_autoloop 的 status 工具查看状态，然后只回复：状态读取完成。不要调用其他工具。",
-    ]);
-    assert.ok(calls > 0);
-    assert.ok(out.includes("状态读取完成"));
-    console.log(
-      JSON.stringify({
-        client: "Codex MCP",
-        version: "2025-11-25",
-        statusCalls: calls,
-        machine: cpus()[0].model,
-        ms: Date.now() - start,
-      }),
-    );
-  }
+    child.stdin!.end(requests.map((request) => JSON.stringify({ jsonrpc: "2.0", ...request })).join("\n") + "\n");
+  });
+  const responses = stdout.trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(responses.length, 3);
+  assert.equal(responses.find((reply) => reply.id === 1).result.protocolVersion, "2025-11-25");
+  assert.ok(responses.find((reply) => reply.id === 2).result.tools.some((tool: { name: string }) => tool.name === "status"));
+  const status = responses.find((reply) => reply.id === 3);
+  assert.equal(status.error, undefined);
+  assert.equal(status.result.isError, undefined);
+  assert.equal(calls, 1);
+  console.log(JSON.stringify({ protocol: "MCP", statusCalls: calls, ms: Date.now() - started }));
 } finally {
-  if (server) {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
-  hub?.db.close();
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  hub.db.close();
   rmSync(home, { recursive: true, force: true });
 }

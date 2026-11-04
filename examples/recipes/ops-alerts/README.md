@@ -12,7 +12,7 @@ curl -fsS http://127.0.0.1:3350/v1/events -H "Authorization: Bearer $SHOP_KEY" -
 ```
 
 ## 要改哪几处
-- 两处 `worker`、`cwd` 换成接单电脑和代码目录；`use` 选 `codex` 或 `claude`。
+- 两处 `worker`、`cwd` 换成接单电脑和代码目录；`use` 固定为 `herdr-core`，`options.profile` 选择本机已验收的 Herdr profile（`reader` 为只读，`developer` 为开发）。
 - 权限：`read`。只读代码和事件附带的调用栈，不需要联网；Claude 的 plan 是工具审批规则，不是系统沙箱，见[权限说明](../../../docs/plugins.md#access-实际能做什么)。
 - `restart.sh` 换成固定的重启及健康检查命令；跨电脑发送前先按[配置手册](../../../skills/agent-autoloop/SKILL.md#放到服务器加电脑)设置地址。
 - 不给 `shop-fix` 建外部来源密钥。重启脚本不受 `access` 限制，是否已获同意由 Skill 核对，不能当成强制审批。

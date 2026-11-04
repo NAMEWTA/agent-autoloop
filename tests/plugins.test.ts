@@ -1,6 +1,7 @@
 // Failure modes: built-ins bypass external plugin discovery; plugin names escape their directory; installation overwrites
 // an existing plugin or runs its scripts; an adapter path survives only in the old directory.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,10 +10,8 @@ const home = setup("plugins");
 const { loadPlugin } = await import("../host/plugins.ts");
 test("all built-in kinds use the same loader and external plugins take precedence", async () => {
   for (const [name, kind] of [
-    ["claude", "agent"],
-    ["codex", "agent"],
-    ["command", "agent"],
-    ["acp", "agent"],
+    ["herdr-core", "agent"],
+    ["script", "agent"],
     ["feishu", "channel"],
     ["webhook", "channel"],
     ["github", "source"],
@@ -22,4 +21,17 @@ test("all built-in kinds use the same loader and external plugins take precedenc
   writeFileSync(join(home, "plugins", "outside", "agent.ts"), "export default {marker:42};");
   assert.equal((await loadPlugin("outside", "agent")).marker, 42);
   await assert.rejects(() => loadPlugin("../outside", "agent"));
+});
+
+test("plugin management dispatches through the same installed override without a provider branch", () => {
+  const dir = join(home, "plugins", "managed");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "agent.ts"), "export default {control: async args => ({received:args})};");
+  const result = spawnSync(process.execPath, [join(import.meta.dirname, "../bin/agent-autoloop.ts"), "plugin", "managed", "inspect", "session-one"], {
+    env: process.env,
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), { received: ["inspect", "session-one"] });
 });

@@ -19,7 +19,7 @@ const dir = mkdtempSync(join(tmpdir(), "agent-autoloop-desktop-"));
 const rulesFile = join(dir, "rules.json");
 const rulesWith = (channels: object) => ({
   sources: { local: { name: "本机" } },
-  agents: { agent: { name: "Agent", worker: "this-one", use: "command", command: ["true"] } },
+  agents: { agent: { name: "Agent", worker: "this-one", use: "script", command: ["true"] } },
   channels,
   rules: [],
 });
@@ -228,7 +228,7 @@ const installEnv = (place: string) => {
 test("init turns it on in both files, with a key of its own", () => {
   const place = join(dir, "new");
   const env = installEnv(place);
-  const done = program(env, "init", "--no-service", "--command", "true", "--port", "3999");
+  const done = program(env, "init", "--no-service", "--script", "true", "--port", "3999");
   assert.equal(done.status, 0, done.stderr);
   const rules = JSON.parse(readFileSync(join(place, "rules.json"), "utf8"));
   const config = JSON.parse(readFileSync(join(place, "config.json"), "utf8"));
@@ -244,7 +244,7 @@ test("a rules file already there stays as it was, and no channel is added beside
   mkdirSync(place);
   const theirs = JSON.stringify(rulesWith({}));
   writeFileSync(join(place, "rules.json"), theirs);
-  const done = program(installEnv(place), "init", "--no-service", "--command", "true", "--port", "3999");
+  const done = program(installEnv(place), "init", "--no-service", "--script", "true", "--port", "3999");
   assert.equal(done.status, 0, done.stderr);
   assert.equal(readFileSync(join(place, "rules.json"), "utf8"), theirs);
   assert.equal(JSON.parse(readFileSync(join(place, "config.json"), "utf8")).channels, undefined);

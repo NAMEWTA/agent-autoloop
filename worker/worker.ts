@@ -1,6 +1,6 @@
 // The worker: on a machine that nothing can reach, it keeps coming to the hub for work and starts an agent for each
-// job. An agent runs detached, in its own process group, writing to files, so the worker can stop and come back and
-// find it still going, or finished. A job is saved before anything slow happens; a result is saved before it's handed
+// job. Each local process writes to files in a detached process group. A persistent adapter must also account for
+// execution outside that group, so losing its observer cannot be mistaken for finished work. A job is saved before anything slow happens; a result is saved before it's handed
 // in and stays until the hub has taken it.
 import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -55,6 +55,13 @@ type Entry = {
   resume: string | null;
   repairs: number;
   triedFresh: boolean;
+  input?: Turn;
+  persistent?: boolean;
+  state?: "running" | "uncertain";
+  recoveryError?: string;
+  stopConfirmed?: boolean;
+  finishedReading?: Reading;
+  originalReading?: Reading;
   usage?: Usage;
   pid?: number;
   launchedAt?: number;
@@ -131,6 +138,36 @@ function groupAlive(entry: Entry) {
     });
 }
 
+/** Ask the local worker to stop a retained execution whose hub lease may already be unknown. */
+export function requestRecoveryStop(run: number): boolean {
+  if (!Number.isSafeInteger(run) || run < 1 || !existsSync(RUNS)) return false;
+  for (const id of readdirSync(RUNS)) {
+    const dir = path.join(RUNS, id);
+    let entry: Entry;
+    try {
+      entry = JSON.parse(readFileSync(path.join(dir, "entry.json"), "utf8")) as Entry;
+    } catch {
+      continue;
+    }
+    if (entry.run !== run || entry.result) continue;
+    const file = path.join(dir, "cancel.request");
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, JSON.stringify({ run, attempt: entry.attempt, token: entry.token }), { mode: 0o600 });
+    renameSync(temporary, file);
+    return true;
+  }
+  return false;
+}
+
+function requestedStop(entry: Entry) {
+  try {
+    const request = JSON.parse(readFileSync(path.join(entry.dir, "cancel.request"), "utf8"));
+    return request.run === entry.run && request.attempt === entry.attempt && request.token === entry.token;
+  } catch {
+    return false;
+  }
+}
+
 function snapshot(file: string) {
   if (!existsSync(file)) return "";
   const size = statSync(file).size;
@@ -171,29 +208,41 @@ export function createWorker({
       }
     });
 
-  /** Starts a turn of the agent: a process that outlives this one, leaving its output and exit code in files. */
-  function launch(entry: Entry, adapter: Adapter, prompt: string) {
-    entry.turn += 1;
-    entry.launchedAt = now();
-    delete entry.finishedAt;
-    delete entry.pid;
-    delete entry.stopping;
-    delete entry.why;
-    save(entry);
+  function turnFor(entry: Entry, prompt = entry.prompt): Turn {
     const { rule, agent } = entry.job;
-    const cwd = rule.cwd.replace(/^~(?=\/)/, homedir());
-    const turn: Turn = {
+    return {
       prompt,
       session: entry.session,
       resume: entry.resume,
-      cwd,
+      cwd: rule.cwd.replace(/^~(?=\/)/, homedir()),
       model: agent.model,
       effort: agent.effort,
       access: agent.access as Turn["access"],
       command: agent.command,
+      options: agent.options,
+      execution: { run: entry.run, attempt: entry.attempt, turn: entry.turn },
       contextFile: path.join(entry.dir, "context.json"),
       folder: entry.dir,
     };
+  }
+
+  /** Save the exact turn before dispatch; recovery observes it rather than constructing another prompt. */
+  function launch(entry: Entry, adapter: Adapter, prompt: string) {
+    entry.turn += 1;
+    entry.launchedAt = now();
+    entry.persistent = adapter.capabilities?.persistent === true;
+    delete entry.finishedAt;
+    delete entry.finishedReading;
+    delete entry.pid;
+    delete entry.stopping;
+    delete entry.stopConfirmed;
+    delete entry.why;
+    delete entry.state;
+    delete entry.recoveryError;
+    entry.input = turnFor(entry, prompt);
+    save(entry);
+    const turn = entry.input;
+    const { cwd } = turn;
     if (!existsSync(cwd)) throw new Error(`在 ${cwd} 启动不了：这个目录不存在`);
     const argv = adapter.command(turn);
     const { out, err, exit } = files(entry);
@@ -222,7 +271,7 @@ export function createWorker({
     child.unref();
     entry.pid = child.pid;
     save(entry);
-    log(`run ${entry.run} (${rule.name}) turn ${entry.turn} started, pid ${child.pid}`);
+    log(`run ${entry.run} (${entry.job.rule.name}) turn ${entry.turn} started, pid ${child.pid}`);
   }
 
   function endWith(entry: Entry, result: Result) {
@@ -266,24 +315,26 @@ export function createWorker({
 
   function discardReceipt(entry: Entry, adapter: Adapter, problem: string) {
     const original = { ...entry, turn: entry.turn - entry.repairs };
-    const reading = read(original, adapter, 0);
-    const { result } = resultFrom(readMessage(reading.text!), {
-      session: reading.session ?? (adapter.link ? entry.session : undefined),
+    const reading = entry.originalReading ?? read(original, adapter, 0);
+    const { result } = resultFrom(readMessage(reading.text ?? ""), {
+      session: reading.session ?? (adapter.capabilities?.resume ? entry.session : undefined),
       usage: entry.usage,
     });
+    const receipt = path.join(entry.dir, `receipt-${original.turn}.txt`);
+    writeFileSync(receipt, reading.text ?? "", { mode: 0o600 });
     const notice: Notice = {
       title: `「${entry.job.rule.name}」的回执读不懂`,
-      text: `这一轮按第一行算结束了，但它要中台做的事没有生效（${problem}）。原文在 ${files(original).out}。`,
+      text: `这一轮按第一行算结束了，但它要中台做的事没有生效（${problem}）。回执原文在 ${receipt}，进程输出在 ${files(original).out}。`,
     };
     endWith(entry, { ...result, notice: [...(result.notice ?? []), notice] });
   }
 
   /** A turn has ended. What it said is a result, or a reason to ask it again without redoing anything. */
-  function conclude(entry: Entry, adapter: Adapter, code: number | null) {
+  function conclude(entry: Entry, adapter: Adapter, code: number | null, reading?: Reading) {
     // One ended because its turn was over but it wouldn't exit said what it had to say first.
-    const seen = read(entry, adapter, entry.finishedAt ? 0 : code);
+    const seen = reading ?? entry.finishedReading ?? read(entry, adapter, entry.finishedAt !== undefined ? 0 : code);
     entry.usage = addUsage(entry.usage, seen.usage);
-    const session = seen.session ?? (entry.turn > 0 && adapter.link ? entry.session : undefined);
+    const session = seen.session ?? (entry.turn > 0 && adapter.capabilities?.resume ? entry.session : undefined);
     if (seen.session) entry.session = seen.session;
     const usage = entry.usage && { usage: entry.usage };
     const known = session && { session };
@@ -298,7 +349,7 @@ export function createWorker({
       const error = seen.error || "没留下结果";
       if (entry.repairs) return discardReceipt(entry, adapter, error);
       // The conversation may not be there to go on in, or something else has it open: this go carries on in a new one.
-      if (entry.resume && !entry.triedFresh && entry.repairs === 0) {
+      if (entry.resume && !entry.triedFresh && entry.repairs === 0 && !entry.persistent) {
         log(`run ${entry.run}: couldn't go on in ${entry.resume} (${error}); starting a new session`);
         entry.triedFresh = true;
         entry.resume = null;
@@ -316,7 +367,8 @@ export function createWorker({
     if (entry.repairs && !problem && result.outcome === "failed") return discardReceipt(entry, adapter, result.error!);
     if (!problem) return endWith(entry, result);
     // Its work is done and only the receipt is wrong: it writes the receipt again, and does nothing again.
-    if (adapter.link && entry.repairs < REPAIRS && seen.session) {
+    entry.originalReading ??= seen;
+    if (adapter.capabilities?.resume && entry.repairs < REPAIRS && seen.session) {
       log(`run ${entry.run}: receipt not readable (${problem}); asking again`);
       entry.repairs += 1;
       entry.resume = seen.session;
@@ -330,14 +382,97 @@ export function createWorker({
     discardReceipt(entry, adapter, problem);
   }
 
-  /** Looks at a run in hand: still going, to be stopped, or ended. */
+  function pending(entry: Entry, state: "running" | "uncertain", error?: string) {
+    if (entry.state !== state || entry.recoveryError !== error) {
+      entry.state = state;
+      entry.recoveryError = error;
+      save(entry);
+      if (state === "uncertain") log(`run ${entry.run}: 执行状态待核实${error ? `（${error}）` : ""}`);
+    }
+  }
+
+  async function sayStarted(entry: Entry, adapter: Adapter, seen: Reading) {
+    const session = seen.session ?? (adapter.capabilities?.resume ? entry.session : undefined);
+    if (seen.session && seen.session !== entry.session) {
+      entry.session = seen.session;
+      save(entry);
+    }
+    if (!session || session === entry.told) return;
+    try {
+      await hub.started(entry.run, entry.token, { session, ...(adapter.link && { link: adapter.link(session) }) });
+      entry.told = session;
+      save(entry);
+    } catch (error) {
+      log(`run ${entry.run}: couldn't say it started: ${error}`);
+    }
+  }
+
+  async function recover(entry: Entry, adapter: Adapter): Promise<Reading> {
+    if (!adapter.recover) return { state: "uncertain", error: "连接已断开，插件不能核实实际执行状态" };
+    try {
+      const seen = await adapter.recover(entry.input ?? turnFor(entry));
+      if (!seen.state && seen.finished !== true) {
+        return { ...seen, state: "uncertain", error: seen.error ?? "恢复查询尚未确认实际执行已经结束" };
+      }
+      if (!seen.state && !seen.text?.trim() && seen.error === undefined) {
+        return { ...seen, state: "uncertain", error: "恢复查询没有给出实际执行状态" };
+      }
+      return seen;
+    } catch (error) {
+      return { state: "uncertain", error: String((error as Error).message ?? error).slice(0, 500) };
+    }
+  }
+
+  async function finishStopping(entry: Entry, adapter: Adapter) {
+    const remote = entry.why !== "finished" && (entry.persistent || adapter.stop);
+    if (remote && !entry.stopConfirmed) {
+      let stopped = false;
+      try {
+        stopped = (await adapter.stop?.(entry.input ?? turnFor(entry), entry.why as "cancel" | "timeout")) === true;
+      } catch (error) {
+        pending(entry, "uncertain", String((error as Error).message ?? error).slice(0, 500));
+        return;
+      }
+      if (!stopped) return pending(entry, "uncertain", "还不能确认实际执行已经停止");
+      entry.stopConfirmed = true;
+      entry.stopping = now();
+      delete entry.state;
+      delete entry.recoveryError;
+      save(entry);
+      signal(entry, "SIGTERM");
+    }
+    if (groupAlive(entry)) {
+      if (now() - entry.stopping! > STOP_GRACE) signal(entry, "SIGKILL");
+      return;
+    }
+    const { exit } = files(entry);
+    const code = existsSync(exit) ? Number(readFileSync(exit, "utf8").trim()) : null;
+    // A confirmed stop is authoritative even when the observer never printed a final envelope.
+    let seen: Reading;
+    try {
+      seen = entry.finishedReading ?? read(entry, adapter, entry.why === "finished" ? 0 : code);
+    } catch {
+      seen = {};
+    }
+    conclude(entry, adapter, code, seen);
+  }
+
+  /** Looks at the execution, not just the lifetime of its local observer process. */
   async function check(entry: Entry) {
     if (entry.result) return;
+    if (requestedStop(entry)) stop(entry, "cancel");
+    if (entry.turn === 0 && entry.stopping !== undefined) return endWith(entry, { outcome: "cancelled", summary: "已停止" });
     let adapter: Adapter;
     try {
       adapter = await adapterFor(entry.job.agent.use);
     } catch (error) {
-      return endWith(entry, { outcome: "failed", error: String((error as Error).message).slice(0, 500) });
+      const message = String((error as Error).message).slice(0, 500);
+      if (entry.persistent) return pending(entry, "uncertain", message);
+      return endWith(entry, { outcome: "failed", error: message });
+    }
+    if (entry.persistent === undefined) {
+      entry.persistent = adapter.capabilities?.persistent === true;
+      save(entry);
     }
     if (entry.turn === 0) {
       // The worker stopped while starting it, before anything was launched.
@@ -351,50 +486,50 @@ export function createWorker({
         return endWith(entry, { outcome: "failed", error: String((error as Error).message ?? error).slice(0, 500) });
       }
     }
+    if (entry.stopping !== undefined) return finishStopping(entry, adapter);
     const { exit } = files(entry);
-    if (entry.stopping !== undefined) {
-      if (groupAlive(entry)) {
-        if (now() - entry.stopping > STOP_GRACE) signal(entry, "SIGKILL");
-        return;
-      }
-      return conclude(entry, adapter, existsSync(exit) ? Number(readFileSync(exit, "utf8").trim()) : null);
-    }
-    if (existsSync(exit)) return conclude(entry, adapter, Number(readFileSync(exit, "utf8").trim()));
+    let code = existsSync(exit) ? Number(readFileSync(exit, "utf8").trim()) : null;
+    const ended = code !== null || !alive(entry);
     // The shell can publish its exit between the first file check and ps returning.
-    if (!alive(entry)) {
-      return conclude(entry, adapter, existsSync(exit) ? Number(readFileSync(exit, "utf8").trim()) : null);
+    if (ended && code === null && existsSync(exit)) code = Number(readFileSync(exit, "utf8").trim());
+    let seen: Reading;
+    try {
+      seen = entry.finishedReading ?? read(entry, adapter, code);
+    } catch (error) {
+      seen = { error: String((error as Error).message ?? error).slice(0, 500) };
     }
-    const seen = read(entry, adapter, null);
-    const session = seen.session ?? (adapter.link ? (entry.resume ?? entry.session) : undefined);
-    if (session && session !== entry.told) {
-      try {
-        await hub.started(entry.run, entry.token, { session, ...(adapter.link && { link: adapter.link(session) }) });
-        entry.told = session;
+    const completed = seen.finished && !seen.state && seen.error === undefined && seen.text?.trim();
+    if (ended && (entry.persistent || adapter.recover) && !completed) seen = await recover(entry, adapter);
+    await sayStarted(entry, adapter, seen);
+    if (seen.state) pending(entry, seen.state, seen.error);
+    else if (entry.persistent && !ended && !completed) {
+      pending(entry, seen.error !== undefined || seen.finished ? "uncertain" : "running",
+        seen.error ?? (seen.finished ? "还没有收到这一轮的完整回执" : undefined));
+    }
+    else {
+      delete entry.state;
+      delete entry.recoveryError;
+      if (ended) return conclude(entry, adapter, code, seen);
+      if (seen.finished) {
+        if (seen.text?.trim() || seen.error !== undefined) entry.finishedReading = seen;
+        entry.finishedAt ??= now();
         save(entry);
-      } catch (error) {
-        log(`run ${entry.run}: couldn't say it started: ${error}`);
       }
     }
     const moment = now();
     const limit = (entry.job.agent.timeout ?? TIMEOUT_MINUTES) * 60_000;
     if (moment - (entry.launchedAt ?? moment) > limit) return stop(entry, "timeout");
-    if (seen.finished) {
-      // Its turn is over but it hasn't gone: whatever it's stuck on, the answer is already there.
-      if (!entry.finishedAt) {
-        entry.finishedAt = moment;
-        save(entry);
-      } else if (moment - entry.finishedAt > GRACE) {
-        stop(entry, "finished");
-      }
-    }
+    if (entry.finishedAt !== undefined && moment - entry.finishedAt > GRACE) stop(entry, "finished");
   }
 
   function stop(entry: Entry, why: "cancel" | "timeout" | "finished") {
     if (entry.stopping !== undefined || entry.result) return;
     entry.stopping = now();
     entry.why = why;
+    // Stopping the bridge proves nothing about a runtime outside its process group.
+    if (entry.persistent && why !== "finished") entry.state = "uncertain";
     save(entry);
-    signal(entry, "SIGTERM");
+    if (!entry.persistent || why === "finished") signal(entry, "SIGTERM");
     log(`run ${entry.run}: stopping (${why})`);
   }
 
@@ -450,8 +585,8 @@ export function createWorker({
       const answer = await hub.work({
         claim,
         wait: held.length ? 1 : wait,
-        running: held.map((entry) => entry.run),
-        capacity: held.length < capacity,
+        running: held.filter((entry) => entry.state !== "uncertain").map((entry) => entry.run),
+        capacity: held.length < capacity && !held.some((entry) => entry.state === "uncertain"),
       });
       for (const id of answer?.cancel ?? []) {
         const entry = held.find((entry) => entry.run === id);

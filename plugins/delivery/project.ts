@@ -8,7 +8,7 @@ export type Settings = {
   admin_merge: string[];
   check: { workflow: string; job: string };
   ship: { workflow: string };
-  review: { points: string; xhigh: string[]; status: string; command?: string[] };
+  review: { points: string; profile: string; xhigh: string[]; xhighProfile?: string; status: string };
   health?: { url: string; require: Record<string, unknown>; field: string; pattern: string };
 };
 export type Live = { sha: string; release: string };
@@ -29,7 +29,11 @@ export function settings(value: any, testLocalHealth = false): Settings {
   if (Object.keys(value).some((key) => !SETTINGS_KEYS.includes(key))) bad();
   const { review, health } = value;
   if (!review || !isPaths([review.points]) || (review.xhigh !== undefined && !isPaths(review.xhigh))) bad();
-  if (review.command !== undefined && (!isWords(review.command) || !review.command.length)) bad();
+  const profile = (name: unknown) => typeof name === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/.test(name);
+  if (!profile(review.profile)) bad();
+  if (Object.keys(review).some((key) => !["points", "profile", "xhigh", "xhighProfile", "status"].includes(key))) bad();
+  if (review.xhighProfile !== undefined && !profile(review.xhighProfile)) bad();
+  if (review.xhigh?.length && !review.xhighProfile) bad();
   if (review.status !== undefined && (typeof review.status !== "string" || !review.status.trim())) bad();
   if (value.admin_merge !== undefined && !isWords(value.admin_merge)) bad();
   for (const workflow of [value.check?.workflow, value.ship?.workflow]) {

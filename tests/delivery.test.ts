@@ -10,7 +10,7 @@ import { settings } from "../plugins/delivery/project.ts";
 const config = settings({
   repo: "example/app",
   internal: ["docs/**/*.md"],
-  review: { points: "AGENTS.md", status: "my-review" },
+  review: { points: "AGENTS.md", profile: "review", status: "my-review" },
   health: {
     url: "https://example.invalid/health",
     field: "commit",

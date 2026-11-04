@@ -1,7 +1,7 @@
 // The one thing an Agent has to get right, and what a worker makes of it: what a run is told, and how its last message
 // is read. Only what the hub itself knows goes in the prompt: where each event came from, its type, subject and link,
 // all checked at the door. What people wrote stays in the context file, marked as data. Everything else an Agent wants
-// of the hub it writes in a receipt, so it needs no tool, no key and no connection to the hub at all.
+// of the hub it writes in a receipt. A plugin may provide a local receipt submitter; hub credentials stay in the worker.
 import { InputError } from "../kernel/errors.ts";
 import type { Job } from "../protocol/job.ts";
 import { parseResult, type Result } from "../protocol/validate.ts";
@@ -69,8 +69,8 @@ export function promptFor(job: Job, contextFile: string) {
 }
 
 export const repairPrompt = (problem: string) =>
-  `你上一条消息的回执读不懂（${problem}）。你做过的事不要重做，也不要调用任何工具，` +
-  "只把最后一条消息按格式重写一遍：第一行是结论，末尾一个标记为 agent-autoloop 的代码块，里面是合法的 JSON。";
+  `你上一条消息的回执读不懂（${problem}）。你做过的事不要重做，不要调用其他工具，不要访问网络，` +
+  "只把最后一条消息按格式重写一遍：第一行是结论，末尾一个标记为 agent-autoloop 的代码块，里面是合法的 JSON。若本轮启动指令指定了本地回执提交器，只允许调用该提交器提交改写后的回执，不得自行选择其他程序。";
 
 type Message = {
   outcome: "done" | "nothing" | "failed";

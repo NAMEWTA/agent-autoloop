@@ -1,18 +1,50 @@
 {
   "timezone": "Asia/Shanghai",
-  "askFirst": ["删数据", "停服", "花钱", "对外发消息", "改产品方向", "新建或轮换密钥", "修改权限"],
-  "sources": { "browser-tasks": { "name": "网页核实请求" } },
-  "agents": {
-    "browser-owner": { "name": "Claude 主任务", "worker": "my-computer", "use": "claude", "access": "edit" }
+  "askFirst": [
+    "删数据",
+    "停服",
+    "花钱",
+    "对外发消息",
+    "改产品方向",
+    "新建或轮换密钥",
+    "修改权限"
+  ],
+  "sources": {
+    "browser-tasks": {
+      "name": "网页核实请求"
+    }
   },
-  "channels": { "feishu": { "name": "飞书", "answerers": ["ou_REPLACE_ME"] } },
+  "agents": {
+    "browser-owner": {
+      "name": "网页任务负责人",
+      "worker": "my-computer",
+      "use": "herdr-core",
+      "access": "edit",
+      "options": {
+        "profile": "developer"
+      }
+    }
+  },
+  "channels": {
+    "feishu": {
+      "name": "飞书",
+      "answerers": [
+        "ou_REPLACE_ME"
+      ]
+    }
+  },
   "rules": [
     {
-      "name": "委托 Codex 核实网页",
-      "when": { "source": "browser-tasks", "types": ["browser.verify"] },
+      "name": "委托网页核实",
+      "when": {
+        "source": "browser-tasks",
+        "types": [
+          "browser.verify"
+        ]
+      },
       "to": "browser-owner",
       "cwd": "~/.agent-autoloop/work/browser-handoff",
-      "skill": "claude-browser-handoff",
+      "skill": "browser-handoff",
       "tell": "needed"
     }
   ]
