@@ -99,7 +99,7 @@ after(async () => {
 
 test("one machine, one command: an event, a question, an answer, the work done", async () => {
   const port = await freePort();
-  const done = cli("init", "--no-service", "--command", script, "--port", String(port));
+  const done = cli("init", "--no-service", "--script", script, "--port", String(port));
   assert.equal(done.status, 0, done.stderr);
   assert.equal(statSync(join(home, "config.json")).mode & 0o777, 0o600, "its keys are private");
   assert.equal(cli("init", "--no-service").status, 1, "a second init doesn't overwrite the first");
@@ -207,7 +207,7 @@ test("the user's Agents are shown how to set it up, when this is the install in 
   delete usual.AGENT_AUTOLOOP_HOME;
   const done = spawnSync(
     process.execPath,
-    ["--disable-warning=ExperimentalWarning", bin, "init", "--no-service", "--command", "true"],
+    ["--disable-warning=ExperimentalWarning", bin, "init", "--no-service", "--script", "true"],
     { env: usual, encoding: "utf8", timeout: 30_000 },
   );
   assert.equal(done.status, 0, done.stderr);

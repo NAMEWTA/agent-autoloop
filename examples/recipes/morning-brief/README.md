@@ -12,6 +12,6 @@ agent-autoloop check
 规则几秒内生效；把 cron 临时设成 `* * * * *` 可在一分钟内试跑。
 
 ## 要改哪几处
-- `worker` 换成 `agent-autoloop status` 显示的接单电脑；`use` 选 `codex` 或 `claude`。
+- `worker` 换成 `agent-autoloop status` 显示的接单电脑；`use` 固定为 `herdr-core`，`options.profile` 选择本机已验收的 Herdr profile（`reader` 为只读，`developer` 为开发）。
 - `cwd` 换成已有的笔记目录；`cron` 是当地时间，默认每天八点。
 - 权限：`edit`。两种插件都能读本地资料、写早报；不需要联网或任意 shell 命令，见[权限说明](../../../docs/plugins.md#access-实际能做什么)。

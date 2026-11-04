@@ -17,7 +17,7 @@ const PROGRAM = path.join(ROOT, "bin", "agent-autoloop.ts");
 
 const HELP = `Agent 自动化中台
 
-  agent-autoloop init [--agent claude|codex] [--command '某个命令 {prompt}'] [--port 3350] [--no-service]
+  agent-autoloop init [--profile developer | --script /路径/脚本] [--port 3350] [--no-service]
                                     在这台电脑上装好：一个人一台电脑就够
   agent-autoloop try                     用你的 Agent 跑一遍完整流程
   agent-autoloop why <第几轮> [--json]  查看时间线；--json 输出原始事实
@@ -34,11 +34,13 @@ const HELP = `Agent 自动化中台
   agent-autoloop tell <编号> [--task 定时任务名]
                                     直接告诉你一件事，内容从标准输入读
   agent-autoloop stop <第几轮>           停掉一轮
+  agent-autoloop recover <第几轮> --stop  在接单电脑核实并停止保留的执行
   agent-autoloop key new <source|worker|channel|owner> <名字>
                                     新建一把密钥（只显示这一次）
   agent-autoloop key list                有哪些密钥
   agent-autoloop key remove <种类> <名字>  立即收回一把密钥
   agent-autoloop add <git 地址>           安装插件，不自动更新
+  agent-autoloop plugin <名字> <操作>     使用插件自己的管理入口
   agent-autoloop mcp                      用标准输入输出连接 MCP 客户端
   agent-autoloop join <中台地址> --worker <名字> --key <密钥>
                                     另一台电脑只接活时用
@@ -118,35 +120,19 @@ function howToRun() {
   return /\s/.test(PROGRAM) ? `'${PROGRAM}'` : PROGRAM;
 }
 
-/** What was asked for on the command line, or whichever of the usual Agents is installed. */
-async function agentsToUse(named: Flags, worker: string) {
-  const agents: Record<string, { name: string; worker: string; use: string; command?: string[] }> = {};
-  const command = text(named.command);
-  if (command) {
-    agents.agent = { name: "Agent", worker, use: "command", command: command.split(/\s+/) };
-    return agents;
+/** A named runtime profile owns AI CLI selection. Fixed programs remain a separate plugin. */
+function agentsToUse(named: Flags, worker: string) {
+  if (named.agent !== undefined || named.command !== undefined) {
+    return fail("已移除 --agent/--command；AI 任务用 --profile <名称>，固定脚本用 --script <可执行文件路径>");
   }
-  const wanted = text(named.agent);
-  const { adapterFor } = await import("../worker/agents.ts");
-  const emptyTurn = {
-    prompt: "",
-    session: "",
-    resume: null,
-    cwd: "",
-    access: "edit",
-    contextFile: "",
-    folder: "",
-  } as const;
-  for (const name of ["claude", "codex"]) {
-    if (wanted && wanted !== name) continue;
-    const adapter = await adapterFor(name);
-    try {
-      // An adapter finds its program to build the command line, and throws if it's not there.
-      adapter.command(emptyTurn);
-      agents[name] = { name: name === "claude" ? "Claude Code" : "Codex", worker, use: name };
-    } catch {}
-  }
-  return agents;
+  if (named.script !== undefined && named.profile !== undefined) return fail("--profile 和 --script 只能选一个");
+  const script = text(named.script);
+  if (named.script !== undefined && !script) return fail("--script 需要一个可执行文件路径");
+  if (script) return { agent: { name: "Script", worker, use: "script", command: [script] } };
+  if (named.profile !== undefined && !text(named.profile)) return fail("--profile 需要一个本机配置名称");
+  const profile = text(named.profile) ?? "developer";
+  if (!/^[a-z][a-z0-9_-]{0,63}$/.test(profile)) return fail("--profile 需要小写字母开头的配置名称");
+  return { agent: { name: "Herdr Agent", worker, use: "herdr-core", options: { profile } } };
 }
 
 async function init(args: string[]) {
@@ -158,13 +144,7 @@ async function init(args: string[]) {
     .toLowerCase()
     .replace(/\.local$/, "");
   const worker = hostName.replace(/[^a-z0-9-]/g, "-").replace(/^[^a-z]+/, "") || "this-machine";
-  const agents = await agentsToUse(named, worker);
-  if (!Object.keys(agents).length) {
-    return fail(
-      "这台电脑上没找到 Claude Code 或 Codex。先装好并登录，" +
-        "或者用 --command 指定别的命令行 Agent，比如 --command 'hermes chat -q {prompt}'",
-    );
-  }
+  const agents = agentsToUse(named, worker);
   const port = text(named.port) ?? "3350";
   const url = `http://127.0.0.1:${port}`;
   const ownRules = !existsSync(RULES_FILE);
@@ -318,6 +298,7 @@ async function status() {
     const shown = run.state === "queued" && run.attempts > 0 ? "等重派" : (RUN_STATES[run.state] ?? run.state);
     const outcome = run.summary || run.error;
     console.log(`  #${run.id} ${run.rule} ${shown}${outcome ? `：${outcome}` : ""}`);
+    if (run.session) console.log(`    会话编号：${run.session}`);
   }
   if (state.unrouted.length) console.log("\n没有规则接的事件");
   for (const { source, type, subject, summary } of state.unrouted.slice(0, 5)) {
@@ -353,6 +334,7 @@ async function resolve(args: string[]) {
 
 async function doctor() {
   let bad = 0;
+  let configured: Record<string, { options?: Record<string, unknown> }> = {};
   const say = (ok: boolean, words: string) => {
     console.log(`${ok ? "●" : "○"} ${words}`);
     if (!ok) bad += 1;
@@ -363,7 +345,7 @@ async function doctor() {
   if (config.hub) {
     const { parseRules } = await importRules();
     try {
-      parseRules(readFileSync(RULES_FILE, "utf8"));
+      configured = parseRules(readFileSync(RULES_FILE, "utf8")).agents;
       say(true, `规则 ${RULES_FILE}`);
     } catch (error) {
       say(false, (error as Error).message);
@@ -384,7 +366,7 @@ async function doctor() {
         if (agent.worker === config.worker?.name) {
           const { adapterFor } = await import("../worker/agents.ts");
           const problem = await adapterFor(agent.use).then(
-            (adapter) => adapter.check?.() ?? null,
+            (adapter) => adapter.check?.(configured[agent.id]?.options) ?? null,
             (error) => String(error.message),
           );
           say(!problem, problem ?? `${agent.name} 可以用`);
@@ -421,6 +403,16 @@ async function check() {
   const { parseRules } = await importRules();
   parseRules(readFileSync(RULES_FILE, "utf8"));
   console.log("规则没问题。");
+}
+
+async function pluginCommand(args: string[]) {
+  const [name, ...parameters] = args;
+  if (!name) return fail("用法：agent-autoloop plugin <名字> <操作>");
+  const { loadPlugin } = await import("../host/plugins.ts");
+  const plugin = await loadPlugin(name, "agent");
+  if (typeof plugin.control !== "function") return fail(`插件 ${name} 没有管理入口`);
+  const result = await plugin.control(parameters);
+  if (result !== undefined) console.log(JSON.stringify(result, null, 2));
 }
 
 async function key(args: string[]) {
@@ -491,6 +483,17 @@ async function stop(args: string[]) {
   console.log("通知它停了。");
 }
 
+async function recover(args: string[]) {
+  const { named, rest } = flags(args);
+  const run = Number(rest[0]);
+  if (!Number.isSafeInteger(run) || run < 1 || named.stop !== true) {
+    return fail("用法：agent-autoloop recover <第几轮> --stop（在原接单电脑上运行）");
+  }
+  const { requestRecoveryStop } = await import("../worker/worker.ts");
+  if (!requestRecoveryStop(run)) return fail("本机没有这轮尚未结算的执行记录");
+  console.log("已记录停止请求。接单程序核实实际执行停止后，才会向中台提交取消结果。");
+}
+
 function service(args: string[]) {
   if (args[0] === "install") return installService();
   if (args[0] === "remove") return removeService();
@@ -531,6 +534,7 @@ const [command, ...args] = process.argv.slice(2);
 const commands: Record<string, () => unknown> = {
   mcp: async () => (await import("./mcp.ts")).mcp(),
   add: () => addPlugin(args),
+  plugin: () => pluginCommand(args),
   init: () => init(args),
   join: () => join(args),
   up: async () => (await import("../host/up.ts")).up(),
@@ -546,6 +550,7 @@ const commands: Record<string, () => unknown> = {
   emit: () => emit(args),
   tell: () => tell(args),
   stop: () => stop(args),
+  recover: () => recover(args),
   update,
   uninstall: async () => {
     const { uninstall } = await import("./uninstall.ts");

@@ -1,8 +1,13 @@
 // Failure modes: event prose chooses a repository or command; a different PR's event is delivered; owner questions leak
 // source code/logs instead of readable text or become empty; attended reviews send duplicate notices;
-// polling changes ids on each read and produces duplicate deliveries.
+// polling changes ids on each read and produces duplicate deliveries; recovery errors permit unsafe child replay.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import adapter from "../plugins/delivery/agent.ts";
+import { recoverReview, REVIEW_UPDATE } from "../plugins/delivery/review.ts";
 import { subjectNumber, question, pendingEvents, deliveryReceipt } from "../plugins/delivery/input.ts";
 test("only a subject for the configured repository chooses a PR", () => {
   assert.equal(subjectNumber("example/app", { events: [{ subject: "example/app#12", summary: "run evil" }] }), 12);
@@ -46,4 +51,51 @@ test("attended findings stay in the receipt without creating a second notice", (
   const unattended = deliveryReceipt(1, result, false);
   assert.ok(unattended.includes('"notice"'));
   assert.ok(unattended.includes("数据会丢"));
+});
+
+test("a lost delivery wrapper cannot turn an uncertain managed review into a retryable failure", () => {
+  assert.deepEqual(adapter.read(REVIEW_UPDATE + '{"state":', null, ""), {});
+  assert.deepEqual(adapter.read(REVIEW_UPDATE + '{"state":"uncertain"}\n', 1, "lost"), { state: "uncertain" });
+  const stopped = REVIEW_UPDATE + '{"state":"running"}\n' + REVIEW_UPDATE + '{"stopped":true}\n';
+  assert.match(adapter.read(stopped, 1, "stopped").error!, /stopped/);
+  assert.deepEqual(adapter.read(stopped + "交付完成", 0, ""), { text: "交付完成", finished: true });
+});
+
+test("delivery recovery distinguishes a finished child from an observation error", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "autoloop-delivery-recovery-"));
+  try {
+    const beforeChild = await recoverReview(folder);
+    assert.equal(beforeChild.finished, true);
+    assert.ok(beforeChild.error);
+    writeFileSync(
+      join(folder, "delivery-review.json"),
+      JSON.stringify({ journal: join(folder, "review.json"), turn: { session: "existing-review" } }),
+    );
+    const unseen = await recoverReview(folder, async (turn) => {
+      assert.equal(turn.session, "existing-review");
+      return { error: "RPC disconnected" };
+    });
+    assert.deepEqual(unseen, { state: "uncertain" });
+    assert.deepEqual(await recoverReview(folder, async () => ({ state: "running" })), { state: "running" });
+    const finished = await recoverReview(folder, async () => ({ finished: true, text: '{"findings":[]}' }));
+    assert.equal(finished.finished, true);
+    assert.ok(finished.error);
+    assert.equal(finished.text, undefined);
+    writeFileSync(
+      join(folder, "review.json"),
+      JSON.stringify({ stopped: true, turn: { session: "existing-review" } }),
+    );
+    const stopped = await recoverReview(folder, async () => {
+      assert.fail("confirmed inner stop must not become an uncertain observation again");
+    });
+    assert.equal(stopped.finished, true);
+    assert.ok(stopped.error);
+    writeFileSync(
+      join(folder, "review.json"),
+      JSON.stringify({ stopped: true, turn: { session: "different-review" } }),
+    );
+    assert.deepEqual(await recoverReview(folder, async () => ({ state: "uncertain" })), { state: "uncertain" });
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });

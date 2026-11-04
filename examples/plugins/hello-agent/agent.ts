@@ -1,9 +1,10 @@
-// The smallest Agent plugin. `echo` stands in for a command-line Agent so this runs with no model and no account: put your
-// CLI's print mode in its place, and read what that CLI really prints.
+// The smallest protocol example. `echo` simulates an Agent, with no model or account.
+// Production AI execution uses the herdr-core plugin and a trusted native-runtime profile.
 // In rules.json: "agents": { "hello": { "name": "Hello", "worker": "mac-mini", "use": "hello-agent" } }
 type Turn = { prompt: string; session: string; resume: string | null; access: "read" | "edit" | "full" };
 
 export default {
+  capabilities: { resume: true },
   command(turn: Turn) {
     const session = turn.resume ?? turn.session;
     const text = `收到了 ${turn.prompt.length} 字的提示词，权限 ${turn.access}。这是 hello-agent，什么也没做。`;
@@ -20,6 +21,6 @@ export default {
       return { error: `读不懂它的输出：${stdout.slice(0, 200)}` };
     }
   },
-  // With a link the worker reports the session as soon as the run starts, and can ask for a bad receipt to be rewritten.
+  // A link is presentation only; capabilities.resume separately permits a receipt repair in this simulated session.
   link: (session: string) => `hello-agent://sessions/${session}`,
 };

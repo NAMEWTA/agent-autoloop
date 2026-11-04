@@ -478,6 +478,10 @@
             "timeout": {
               "type": "integer",
               "minimum": 1
+            },
+            "options": {
+              "type": "object",
+              "additionalProperties": true
             }
           },
           "required": ["id", "name", "use", "access"],

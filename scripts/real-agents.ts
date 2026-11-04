@@ -1,14 +1,26 @@
 // Failure modes: a real CLI never finishes; a receipt is unreadable; the answer loses the session; cleanup leaves a child
-// process or a test database. Claude is pinned to Haiku and all launches, including repair, share a three-turn ceiling.
+// process or a test database. The selected trusted profile owns CLI policy; all launches share a three-turn ceiling.
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir, cpus } from "node:os";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import type { Turn } from "../worker/agents.ts";
+import { homedir, tmpdir, cpus } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const use = process.argv[2];
-assert.ok(["codex", "claude"].includes(use), "用法：node scripts/real-agents.ts codex|claude");
-const home = mkdtempSync(join(tmpdir(), `agent-autoloop-real-${use}-`));
+const profileName = process.argv[2];
+assert.ok(profileName, "用法：node scripts/real-agents.ts <本机已验收的 profile>");
+const profiles = JSON.parse(
+  readFileSync(
+    join(process.env.AGENT_AUTOLOOP_HOME ?? join(homedir(), ".agent-autoloop"), "herdr", "profiles.json"),
+    "utf8",
+  ),
+);
+const profile = profiles.profiles?.[profileName];
+assert.ok(profile && ["read", "edit", "full"].includes(profile.access), "profile 不存在或 access 不正确");
+const use = "herdr-core";
+const home = mkdtempSync(join(tmpdir(), "agent-autoloop-real-herdr-"));
+mkdirSync(join(home, "herdr"));
+writeFileSync(join(home, "herdr", "profiles.json"), JSON.stringify({ profiles: { [profileName]: profile } }), { mode: 0o600 });
 process.env.AGENT_AUTOLOOP_HOME = home;
 process.env.AGENT_AUTOLOOP_RULES = join(home, "rules.json");
 mkdirSync(join(home, "work"));
@@ -21,9 +33,9 @@ writeFileSync(
         name: use,
         worker: "test",
         use,
-        access: "read",
+        access: profile.access,
         timeout: 3,
-        ...(use === "claude" ? { model: "claude-haiku-5-5" } : { model: "gpt-6.1-sol", effort: "low" }),
+        options: { profile: profileName },
       },
     },
     channels: {},
@@ -43,8 +55,10 @@ const { adapterFor } = await import("../worker/agents.ts");
 const adapter = await adapterFor(use);
 const launch = adapter.command;
 let launches = 0;
+const launched = new Map<string, Turn>();
 adapter.command = (turn) => {
   assert.ok(++launches <= 3, "已用完三轮额度");
+  launched.set(turn.resume ?? turn.session, turn);
   return launch(turn);
 };
 const hub = await import("../host/runtime.ts");
@@ -70,14 +84,12 @@ async function until(predicate: (s: any) => boolean) {
   throw new Error("真机试跑超过四分钟");
 }
 try {
-  const problem = adapter.check?.();
+  const problem = adapter.check?.({ profile: profileName });
   if (problem) throw new Error(problem);
   await source.event({ id: "real", type: "test" });
   const waiting = await until((s) => s.cards.some((c: any) => c.kind === "ask"));
   await owner.answer(waiting.cards[0].id, { choice: 1 });
-  const finished = await until((s) =>
-    s.runs.some((r: any) => r.state === "done" && r.summary === "你选了绿色，试跑通过"),
-  );
+  const finished = await until((s) => s.runs.some((r: any) => r.state === "done" && r.summary === "你选了绿色，试跑通过"));
   const runs = finished.runs;
   assert.equal(runs.length, 2);
   assert.equal(runs[0].session, runs[1].session);
@@ -88,7 +100,7 @@ try {
         machine: cpus()[0].model,
         node: process.version,
         agent: use,
-        model: use === "claude" ? "claude-haiku-5-5" : "gpt-6.1-sol",
+        profile: profileName,
         launches,
         runs: runs.length,
         resumed: true,
@@ -100,8 +112,13 @@ try {
     ),
   );
 } finally {
+  let confirmed = true;
+  for (const turn of launched.values()) {
+    const stopped = await adapter.stop?.(turn, "cancel").catch(() => false);
+    if (!stopped) confirmed = false;
+  }
   for (const entry of worker.entries())
-    if (entry.pid) {
+    if (confirmed && entry.pid) {
       try {
         process.kill(-entry.pid, "SIGKILL");
       } catch {}
@@ -109,5 +126,6 @@ try {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   hub.db.close();
-  rmSync(home, { recursive: true, force: true });
+  if (confirmed) rmSync(home, { recursive: true, force: true });
+  else throw new Error(`尚未确认测试终端结束，恢复资料保留在 ${home}；请检查后停止该测试会话`);
 }

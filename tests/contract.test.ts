@@ -3,7 +3,8 @@
 // couldn't work, or that there was nothing to do, is taken as work done; a heading or a receipt ends up in the summary; a
 // receipt that doesn't parse, has unknown fields or breaks the protocol's limits is applied rather than sent back to be
 // rewritten; the receipt isn't found when the message says something after it, or a code block of another kind is taken for
-// one; a result longer than the hub takes is sent as it is; a browser/login block is reported as retryable failure.
+// one; a result longer than the hub takes is sent as it is; a browser/login block is reported as retryable failure;
+// receipt repair forbids its designated local submitter or permits new business/network operations.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { promptFor, readMessage, repairPrompt, resultFrom } from "../worker/contract.ts";
@@ -15,7 +16,7 @@ const job = (over: object = {}) => ({
   session: null,
   askFirst: ["删数据", "花钱"],
   rule: { name: "意见", cwd: "~/x", skill: "handle-notes", prompt: "按手册里的一节做。" },
-  agent: { id: "a", name: "甲", use: "claude", access: "edit" },
+  agent: { id: "a", name: "甲", use: "fixture", access: "edit" },
   context: {
     events: [
       {
@@ -180,4 +181,7 @@ test("asking for a rewrite says not to redo anything", () => {
   const text = repairPrompt("不是合法的 JSON");
   assert.match(text, /不是合法的 JSON/);
   assert.match(text, /不要重做/);
+  assert.match(text, /本地回执提交器/);
+  assert.match(text, /不要调用其他工具/);
+  assert.match(text, /不要访问网络/);
 });

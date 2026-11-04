@@ -4,27 +4,27 @@
 
 ## 安装
 
-支持 macOS、Linux，暂不支持 Windows。需要 Node.js 24 或更新、Git、curl，以及一个已经登录的命令行 Agent。
+支持 macOS、Linux，暂不支持 Windows。需要 Node.js 24 或更新、Git、curl、Herdr Core，以及本机已登录并配置为 Herdr template 的原生 Agent。先按 [Herdr 接入](docs/herdr-core.md#2-安装与-profiles)配置 `~/.agent-autoloop/herdr/profiles.json`；默认选择 `developer` profile。
 
 先检查 `node --version`。Homebrew 的 `node@24` 默认不进 PATH，装好后还要运行 `export PATH="$(brew --prefix node@24)/bin:$PATH"`；需要长期生效时再写入用户的 shell 配置。不要替用户登录，也不要读取或复制登录凭据。
 
 本仓库已公开，安装脚本和代码都可匿名下载，不需要 GitHub 账号、登录或 GitHub CLI（`gh`）。下面的命令安装并启用登录后常驻服务：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KKKKhazix/agent-autoloop/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NAMEWTA/agent-autoloop/main/install.sh | sh
 ```
 
 GitHub Issue 轮询和 PR 交付等功能另需已登录的 `gh`，按对应场景说明配置；运行 Agent 也仍需该 Agent 自己的登录或授权。
 
 用户指定本地仓库时，用该目录的安装脚本，并把 `AGENT_AUTOLOOP_REPO` 设成它的绝对路径。不要下载 GitHub 的旧脚本，也不要用未提交的文件冒充已安装版本；安装器克隆的是本地仓库的 HEAD。
 
-下面以 `/path/to/agent-autoloop` 为例，使用已经登录的 Codex：
+下面以 `/path/to/agent-autoloop` 为例，选择已经验证的 `developer` profile：
 
 ```bash
-AGENT_AUTOLOOP_REPO=/path/to/agent-autoloop sh /path/to/agent-autoloop/install.sh --agent codex
+AGENT_AUTOLOOP_REPO=/path/to/agent-autoloop sh /path/to/agent-autoloop/install.sh --profile developer
 ```
 
-`--agent claude` 选择 Claude Code；只有其他 CLI 时加 `--command 'hermes chat -q {prompt}'`。不指定时会检测本机安装的 Agent，第一种作为试跑对象。
+`--profile <名称>` 选择本机 Herdr profile。不指定时用 `developer`；不检测模型品牌、不拼原生命令参数。纯固定程序安装可用 `--script /absolute/path/to/executable`，不接受自由命令字符串。AI 执行使用 Herdr。
 
 程序装进 `~/.agent-autoloop/app`，配置和记录留在 `~/.agent-autoloop`。默认打开桌面通知；没有图形会话时安静跳过，问题仍能用 `agent-autoloop status` 查看。命令优先放在 PATH 中的 `~/.local/bin`，否则选 PATH 里第一个可写目录，不用 sudo、不覆盖其他程序；没有位置时使用安装器打印的完整路径。
 
@@ -34,13 +34,13 @@ AGENT_AUTOLOOP_REPO=/path/to/agent-autoloop sh /path/to/agent-autoloop/install.s
 
 ## 临时 HOME、CI 或没有服务管理器
 
-使用临时 HOME 时不要装系统服务，不改真实用户的 shell 配置和 Agent 配置。保留调用者给定的 `AGENT_AUTOLOOP_HOME`；用真实 `CODEX_HOME` 只为了沿用已经完成的 Codex 登录。
+使用临时 HOME 时不要装系统服务，不改真实用户的 shell 配置和 Agent 配置。保留调用者给定的 `AGENT_AUTOLOOP_HOME`。为测试单独配置 Herdr 分组、工作目录和 profiles，沿用原生工具已有的授权方式；不要读取、复制或重新保存凭据。自动化测试使用假的 Herdr 服务和原生命令。
 
 在临时环境中选一个空闲端口，运行本地安装脚本，随后启动中台：
 
 ```bash
 port=$(node -e 'const s=require("node:net").createServer().listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')
-AGENT_AUTOLOOP_REPO=/path/to/agent-autoloop sh /path/to/agent-autoloop/install.sh --agent codex --no-service --port "$port"
+AGENT_AUTOLOOP_REPO=/path/to/agent-autoloop sh /path/to/agent-autoloop/install.sh --profile developer --no-service --port "$port"
 agent-autoloop up
 ```
 
@@ -50,7 +50,7 @@ PATH 没有命令时，把 `agent-autoloop` 换成安装器打印的完整路径
 
 ## 验证
 
-先查看安装和连接情况，再用真实 Agent 跑完整问答：
+先查看安装和本机配置，再用真实 Agent 跑完整问答。`doctor` 不代替原生 template 的状态报告、回执通路和权限验收：
 
 ```bash
 agent-autoloop --version
@@ -58,11 +58,11 @@ agent-autoloop doctor
 agent-autoloop try
 ```
 
-`try` 会使用用户的模型额度。在非交互终端，它打印问题和 `agent-autoloop answer` 命令后退出；这是正常等待，不是失败。把问题转给用户，按他的选择回答，再运行 `agent-autoloop status`，看到“试跑通过”才算接通。仅为安装验证时，可以选择第二项绿色完成试跑。
+`try` 会使用用户的模型额度。在非交互终端，它打印问题和 `agent-autoloop answer` 命令后退出；这是正常等待，不是失败。把问题转给用户，按他的选择回答，再运行 `agent-autoloop status`，看到“试跑通过”才算接通。仅为安装验证时，可以选择第二项绿色完成试跑。等待回答不会自动再调用模型；Herdr 和原生终端仍可驻留。若执行结果不明，查看 `agent-autoloop plugin herdr-core inspect <session>`，不要反复试跑同一业务。
 
-Claude 要委托 Codex 处理网页时，可用[浏览器交接模板](examples/recipes/browser-handoff/README.md)，先配置现成入口，再验收首次调用与原会话续办。模板不安装浏览器驱动、不自动放宽 Claude 命令权限。
+主任务要委托网页助手时，可用[浏览器交接模板](examples/recipes/browser-handoff/README.md)，配置独立的 browser profile 和工作目录，验收首次调用与原逻辑会话续办。模板不安装浏览器驱动、不自动扩大原生权限。
 
-任务还需要网页操作时，另按[浏览器接入](docs/plugins.md#浏览器接入)用同一后台启动方式核实实际页面和会话接续。`try` 只证明问答流程；中台不自动提供浏览器连接或修改 Agent 的工具配置。需要本人恢复连接、登录或验证时，保留待验收项并交 `ask`，不要反复重跑已完成的业务。
+任务还需要网页操作时，另按[浏览器接入](docs/plugins.md#浏览器接入)用同一个 Herdr template 核实实际页面和会话接续。`try` 只证明问答流程；中台不自动提供浏览器连接或修改 Agent 的工具配置。需要本人恢复连接、登录或验证时，保留待验收项并交 `ask`，不要反复重跑已完成的业务。
 
 没有安装系统服务时，`doctor` 会显示服务未运行；检查中台、Agent 和桌面通道是否在线即可，不要为了消除这条提示安装真实服务。
 
@@ -82,7 +82,7 @@ Claude 要委托 Codex 处理网页时，可用[浏览器交接模板](examples/
 agent-autoloop uninstall
 ```
 
-终端里确认后才执行；非交互运行时加 `--yes` 跳过确认，数据同样保留。它只停自己的服务和进程、删除指向自身的命令及 Skill 链接，以及安装目录里的 `app`。其他同名文件不动；数据目录不删除。
+终端里确认后才执行；非交互运行时加 `--yes` 跳过确认，数据同样保留。它只停自己的服务和进程、删除指向自身的命令及 Skill 链接，以及安装目录里的 `app`。其他同名文件不动；数据目录不删除。Herdr 管理的原生终端不属于中台服务进程组；卸载前通过插件控制命令核实并停止本次创建的活动会话，不能把卸载成功当作这些终端已经停止。
 
 临时安装验证完，用 `agent-autoloop uninstall --yes` 停掉本次进程，再清掉自己创建的临时目录。不要卸载用户已经在用的中台。
 
@@ -90,6 +90,7 @@ agent-autoloop uninstall
 
 - [配置手册](skills/agent-autoloop/SKILL.md)：接事件插件、通道、多台电脑和交付流水线。
 - [协议](docs/protocol.md)：HTTP、回执、事实日志和故障恢复。
+- [Herdr 接入与迁移](docs/herdr-core.md)：profiles、状态、未知结果、停止、升级与验收。
 - [插件](docs/plugins.md)：三个可运行的最小例子。
 - [安全边界](SECURITY.md)：密钥、执行权限和交付审查。
 

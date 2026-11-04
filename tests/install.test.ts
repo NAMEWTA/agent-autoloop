@@ -68,7 +68,7 @@ if [ "$1" = clone ]; then for target; do :; done; cp -R "${copy}" "$target"; mkd
   const hub = join(person, ".agent-autoloop");
   const program = join(hub, "app", "bin", "agent-autoloop.ts");
   const local = join(person, ".local", "bin");
-  const run = (path: string[], args = ["--no-service", "--command", "true", "--port", "3999"], shell = "/bin/sh") => {
+  const run = (path: string[], args = ["--no-service", "--script", "true", "--port", "3999"], shell = "/bin/sh") => {
     const env: NodeJS.ProcessEnv = { HOME: person, PATH: [...path, tools].join(":") };
     return spawnSync(shell, [script, ...args], {
       env,
@@ -161,7 +161,7 @@ test(
 
 test("the next step is try alone when a service has been started", () => {
   const it = computer();
-  const done = it.run([it.local], ["--command", "true", "--port", "3999"]);
+  const done = it.run([it.local], ["--script", "true", "--port", "3999"]);
   assert.equal(done.status, 0, done.stderr);
   assert.match(done.stdout, /运行 agent-autoloop try 跑一遍完整流程/);
   assert.doesNotMatch(done.stdout, /agent-autoloop up/);

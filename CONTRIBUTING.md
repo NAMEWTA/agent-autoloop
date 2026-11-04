@@ -2,13 +2,11 @@
 
 欢迎提交可复现的问题、文档修正、插件和通用能力改进，中文或英文都可以。
 
-## 去哪里交流
+## 讨论和反馈
 
-- [Issues](https://github.com/KKKKhazix/agent-autoloop/issues/new/choose)：可以复现的故障和有明确场景的功能建议。
-- [使用问答](https://github.com/KKKKhazix/agent-autoloop/discussions/categories/q-a)：安装、规则、Agent 和通道配置。
-- [想法交流](https://github.com/KKKKhazix/agent-autoloop/discussions/categories/ideas)：讨论还没形成开发任务的想法。
-- [实践分享](https://github.com/KKKKhazix/agent-autoloop/discussions/categories/show-and-tell)：分享插件、场景模板和使用经验。
-- 安全问题按 [安全说明](SECURITY.md) 联系维护者，不在公开讨论中披露利用细节。
+本分支维护地址是 [NAMEWTA/agent-autoloop](https://github.com/NAMEWTA/agent-autoloop)，原项目由 [KKKKhazix](https://github.com/KKKKhazix/agent-autoloop) 开源。可复现的问题可通过 [Issues](https://github.com/NAMEWTA/agent-autoloop/issues) 跟踪，修改通过 PR 说明问题、范围和验证。不假定 Discussions 已开启，讨论使用仓库实际开放的渠道。
+
+Herdr 改造的需求、设计、故障规则、迁移和验收矩阵集中在 [docs/herdr-core.md](docs/herdr-core.md)。PR 应引用对应边界，写明已验证和仍需本机验收的项目。不要把无法运行的真实 Agent、权限或故障检查写成通过。
 
 ## 贡献范围
 
@@ -29,3 +27,5 @@
 不要提交密钥、带权限的卡片链接、完整配置、数据库、运行输出或同事资料。问题中的日志和截图也要先脱敏。代码按 [MIT 许可证](LICENSE) 提交。
 
 仓库通过 `main` 分发，安装和更新方式见 [INSTALL.md](INSTALL.md)；目前没有独立发布包或长期支持分支。仓库设置中的自动合并保持关闭，交付插件按 [交付协议](docs/protocol.md#交付插件) 完成审查、检查和合并。
+
+AI 执行扩展优先完善 Herdr template/profile 和通用任务契约；本分支不再接受新的品牌启动适配器。固定脚本、通道和来源仍按原有插件接口扩展。

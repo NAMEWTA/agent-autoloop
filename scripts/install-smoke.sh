@@ -78,7 +78,7 @@ chmod +x "$work/agent.sh"
 port=$(node -e 'const s = require("net").createServer().listen(0, "127.0.0.1", () => { console.log(s.address().port); s.close(); })')
 healthy() { curl --noproxy '*' -fsS "http://127.0.0.1:$port/healthz"; }
 
-sh "$repo/install.sh" --no-service --command "$work/agent.sh" --port "$port" >"$work/install.out" 2>&1 || {
+sh "$repo/install.sh" --no-service --script "$work/agent.sh" --port "$port" >"$work/install.out" 2>&1 || {
   cat "$work/install.out"
   fail "install.sh failed"
 }

@@ -82,8 +82,8 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <!-- 4 kernel mechanism tags -->
 <rect class="chip" x="268" y="180" width="424" height="40" rx="9"/>
 <rect class="tag" x="276" y="187" width="100" height="26" rx="6"/>
-<text x="326" y="204" class="tn" text-anchor="middle">Zero-cost wait</text>
-<text x="386" y="204" class="td">Exits while waiting for you; 0 tokens, resumes chat</text>
+<text x="326" y="204" class="tn" text-anchor="middle">Business wait</text>
+<text x="386" y="204" class="td">No new model turns; native terminals may stay</text>
 
 <rect class="chip" x="268" y="228" width="424" height="40" rx="9"/>
 <rect class="tag" x="276" y="235" width="100" height="26" rx="6"/>
@@ -114,19 +114,17 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <!-- Right: Agent plugins -->
 <rect class="plug" x="764" y="68" width="174" height="316" rx="14"/>
 <text x="780" y="100" class="h2">Agent plugins</text>
-<text x="780" y="121" class="s">AI that does the work</text>
+<text x="780" y="121" class="s">One AI execution path</text>
 <rect class="item" x="778" y="142" width="146" height="36" rx="8"/>
-<text x="851" y="165" class="r" text-anchor="middle">Claude Code</text>
+<text x="851" y="165" class="r" text-anchor="middle">herdr-core</text>
 <rect class="item" x="778" y="188" width="146" height="36" rx="8"/>
-<text x="851" y="211" class="r" text-anchor="middle">Codex</text>
+<text x="851" y="211" class="r" text-anchor="middle">Local profile</text>
 <rect class="item" x="778" y="234" width="146" height="36" rx="8"/>
-<text x="851" y="257" class="r" text-anchor="middle">DeepSeek Harness</text>
+<text x="851" y="257" class="r" text-anchor="middle">Herdr terminal</text>
 <rect class="item" x="778" y="280" width="146" height="36" rx="8"/>
-<text x="851" y="303" class="r" text-anchor="middle">Pi · OpenClaw</text>
+<text x="851" y="303" class="r" text-anchor="middle">Explicit receipt</text>
 <rect class="more" x="778" y="326" width="146" height="32" rx="8"/>
-<circle class="dot" cx="839" cy="342" r="2.4"/>
-<circle class="dot" cx="851" cy="342" r="2.4"/>
-<circle class="dot" cx="863" cy="342" r="2.4"/>
+<text x="851" y="347" class="r" text-anchor="middle">Fixed script plugin</text>
 
 <!-- Bottom human loop: 4 card -> Channel plugins -> You -> 5 answer resumes session -->
 <path class="conn" d="M560 386V448"/>

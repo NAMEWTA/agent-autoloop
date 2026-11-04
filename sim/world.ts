@@ -11,8 +11,8 @@ export const rules = parseRules(
     timezone: "UTC",
     sources: { app: { name: "来源" } },
     agents: {
-      a: { name: "甲", worker: "w1", use: "command", command: ["true"] },
-      b: { name: "乙", worker: "w2", use: "command", command: ["true"] },
+      a: { name: "甲", worker: "w1", use: "script", command: ["true"] },
+      b: { name: "乙", worker: "w2", use: "script", command: ["true"] },
     },
     channels: { chat: { name: "通道", answerers: ["owner"] } },
     rules: [

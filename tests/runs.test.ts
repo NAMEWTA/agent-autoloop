@@ -61,7 +61,7 @@ test("work goes only to its agent's worker, once, with the rule and what to read
   ingest("ops", alert("probe.public"), at(0));
   const w2 = claim("w2", at(1))!;
   assert.equal(w2.rule.name, "告警");
-  assert.equal(w2.agent.use, "codex");
+  assert.equal(w2.agent.use, "herdr-core");
   assert.equal(w2.agent.access, "full");
   assert.deepEqual(
     w2.context.events.map((e) => [e.sourceName, e.type, e.subject]),

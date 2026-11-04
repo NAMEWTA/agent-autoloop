@@ -27,12 +27,15 @@ write("docs/a.md", "original");
 const config = {
   repo: "example/app",
   internal: ["docs/**/*.md"],
-  review: { points: "AGENTS.md", status: "agent-review" },
+  review: { points: "AGENTS.md", profile: "review", status: "agent-review" },
 };
 test("the default review status is neutral and projects can override it", () => {
-  assert.equal(settings({ ...config, review: { points: "AGENTS.md" } }).review.status, "agent-review");
   assert.equal(
-    settings({ ...config, review: { points: "AGENTS.md", status: "project-review" } }).review.status,
+    settings({ ...config, review: { points: "AGENTS.md", profile: "review" } }).review.status,
+    "agent-review",
+  );
+  assert.equal(
+    settings({ ...config, review: { points: "AGENTS.md", profile: "review", status: "project-review" } }).review.status,
     "project-review",
   );
 });
@@ -86,7 +89,10 @@ test("only main provides configuration, with exact path patterns and explicit lo
   assert.ok(settings({ ...config, health }, true));
   assert.throws(() => settings({ ...config, health: { ...health, url: "http://localhost:1234" } }, true));
   assert.throws(() => settings({ ...config, health: { ...health, url: "http://192.168.1.2" } }, true));
-  assert.throws(() => settings({ ...config, review: { ...config.review, command: "sh bad" } }));
+  assert.throws(() => settings({ ...config, review: { ...config.review, command: ["sh", "bad"] } }));
+  assert.throws(() => settings({ ...config, review: { points: "AGENTS.md" } }));
+  assert.throws(() => settings({ ...config, review: { ...config.review, profile: "../developer" } }));
+  assert.throws(() => settings({ ...config, review: { ...config.review, xhigh: ["kernel/**"] } }));
 });
 test("unhealthy, redirected or malformed health cannot authorize skipping a release", async () => {
   const s = settings({

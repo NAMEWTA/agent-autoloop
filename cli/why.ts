@@ -20,7 +20,9 @@ export function formatWhy(id: number, facts: Fact[]) {
   const events = new Set(ownRelations.map((relation) => relation.event_id));
   const runs = allChanges.filter(({ table, row }) => table === "runs" && row?.id === id).map(({ row }) => row!);
   const links = new Map<number, string>();
+  const sessions = new Map<number, string>();
   for (const run of runs) if (run.issued && run.link) links.set(run.issued, run.link);
+  for (const run of runs) if (run.issued && run.session) sessions.set(run.issued, run.session);
   const versions = new Set(runs.map((run) => run.rules_version));
   const rulesAt = new Map<number, any>();
   for (const fact of facts) {
@@ -43,6 +45,9 @@ export function formatWhy(id: number, facts: Fact[]) {
       started.add(row.issued);
     }
     if (row.link && row.link === links.get(row.issued) && row.link !== before?.link) add(fact.at, `会话：${row.link}`);
+    if (!row.link && row.session && row.session === sessions.get(row.issued) && row.session !== before?.session) {
+      add(fact.at, `会话编号：${row.session}`);
+    }
     if (row.finished_at && row.finished_at !== before?.finished_at) {
       add(row.finished_at, `结束：${row.summary || (row.state === "cancelled" ? "已停止" : "没有填写结论")}`);
     }

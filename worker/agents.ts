@@ -1,10 +1,7 @@
-// An agent is a process: give it a prompt, read its last message from what it prints. An adapter is what's different
-// about one: its command line and how to read its output. `plugins/<use>/agent.ts`, in this install's folder first,
-// then the ones that ship. Anything with a print mode needs no file at all: `use: "command"` with a command line in
-// rules.json.
+// The adapter owns execution details. A local process may perform the work itself or bridge a persistent runtime.
+// Installed plugins take precedence over the built-in plugins.
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import path from "node:path";
 import { loadPlugin } from "../host/plugins.ts";
 import type { Usage } from "../protocol/validate.ts";
 
@@ -20,19 +17,34 @@ export type Turn = {
   effort?: string;
   access: Access;
   command?: string[];
+  options?: Record<string, unknown>;
+  execution?: { run: number; attempt: number; turn: number };
   contextFile: string;
   folder: string;
 };
-export type Reading = { text?: string; session?: string; usage?: Usage; error?: string; finished?: boolean };
+export type Reading = {
+  text?: string;
+  session?: string;
+  usage?: Usage;
+  error?: string;
+  finished?: boolean;
+  /** Pending readings cannot conclude a run, even when their bridge has exited. */
+  state?: "running" | "uncertain";
+};
 export type Adapter = {
+  capabilities?: { resume?: boolean; persistent?: boolean };
   /** Its command line for this turn. */
   command(turn: Turn): string[];
   /** What its output says so far. `code` is null while it's still running or when it died without saying. */
   read(stdout: string, code: number | null, stderr: string): Reading;
-  /** Where a person can open this session. */
+  /** Observe the same execution without starting or sending work. Terminal text/errors require `finished: true`. */
+  recover?(turn: Turn): Promise<Reading>;
+  /** True only after confirming that the actual execution stopped, including work outside the bridge process. */
+  stop?(turn: Turn, reason: "cancel" | "timeout"): Promise<boolean>;
+  /** Where a person can open this session. This does not imply resume support. */
   link?(session: string): string;
   /** Whether it's installed and signed in: what's wrong, in words a person can act on, or nothing. */
-  check?(): string | null;
+  check?(configuration?: Record<string, unknown>): string | null;
 };
 
 const adapters = new Map<string, Adapter>();

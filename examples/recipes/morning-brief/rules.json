@@ -1,12 +1,22 @@
 {
   "sources": {},
   "agents": {
-    "agent": { "name": "Agent", "worker": "mac-mini", "use": "codex", "access": "edit" }
+    "agent": {
+      "name": "Agent",
+      "worker": "mac-mini",
+      "use": "herdr-core",
+      "access": "edit",
+      "options": {
+        "profile": "developer"
+      }
+    }
   },
   "rules": [
     {
       "name": "早报",
-      "when": { "cron": "0 8 * * *" },
+      "when": {
+        "cron": "0 8 * * *"
+      },
       "to": "agent",
       "cwd": "~/notes",
       "skill": "morning-brief",

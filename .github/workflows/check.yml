@@ -34,7 +34,12 @@ jobs:
       - if: steps.scope.outputs.scope != 'docs'
         run: npm ci
       - if: steps.scope.outputs.scope != 'docs'
-        run: npm run format:check
+        run: |
+          if ! npm run format:check; then
+            npm run format
+            git diff --exit-code
+            exit 1
+          fi
       - if: steps.scope.outputs.scope != 'docs'
         run: npm run typecheck
       - if: steps.scope.outputs.scope == 'normal'

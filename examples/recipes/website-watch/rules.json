@@ -1,6 +1,14 @@
 {
   "timezone": "Asia/Shanghai",
-  "askFirst": ["删数据", "停服", "花钱", "对外发消息", "改产品方向", "新建或轮换密钥", "修改权限"],
+  "askFirst": [
+    "删数据",
+    "停服",
+    "花钱",
+    "对外发消息",
+    "改产品方向",
+    "新建或轮换密钥",
+    "修改权限"
+  ],
   "sources": {
     "website-watch": {
       "name": "网站巡检"
@@ -10,14 +18,21 @@
     "website-check": {
       "name": "网站检查脚本",
       "worker": "my-computer",
-      "use": "command",
-      "command": ["node", "{cwd}/check.ts", "{cwd}/site.json"]
+      "use": "script",
+      "command": [
+        "node",
+        "{cwd}/check.ts",
+        "{cwd}/site.json"
+      ]
     },
     "website-agent": {
       "name": "网站维护 Agent",
       "worker": "my-computer",
-      "use": "codex",
-      "access": "read"
+      "use": "herdr-core",
+      "access": "read",
+      "options": {
+        "profile": "reader"
+      }
     }
   },
   "rules": [
@@ -32,14 +47,20 @@
       "tell": "needed",
       "emits": {
         "source": "website-watch",
-        "types": ["site.down", "site.recovered"]
+        "types": [
+          "site.down",
+          "site.recovered"
+        ]
       }
     },
     {
       "name": "排查网站异常",
       "when": {
         "source": "website-watch",
-        "types": ["site.down", "site.recovered"]
+        "types": [
+          "site.down",
+          "site.recovered"
+        ]
       },
       "to": "website-agent",
       "cwd": "~/code/my-project",
@@ -50,7 +71,9 @@
   "channels": {
     "feishu": {
       "name": "飞书",
-      "answerers": ["ou_REPLACE_ME"]
+      "answerers": [
+        "ou_REPLACE_ME"
+      ]
     }
   }
 }

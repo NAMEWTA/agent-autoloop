@@ -91,8 +91,8 @@ function checkRule(issues: string[], rules: Rules, rule: Rule, names: Set<string
     checkFields(issues, `${where}的 when `, when, [["cron", isCron, "不是有效的 cron"]]);
   }
   if (!isObject(rule)) return;
-  // A plain command needs no words: a script that polls something is an agent too.
-  if (!rule.skill && !rule.prompt && rules.agents[rule.to]?.use !== "command") {
+  // A deterministic script reads its data file and needs no model instructions.
+  if (!rule.skill && !rule.prompt && rules.agents[rule.to]?.use !== "script") {
     issues.push(`${where}的 skill 和 prompt 至少写一个`);
   }
   if (isObject(rule.emits)) {
@@ -155,8 +155,9 @@ export function parseRules(json: string, now: number, timezone: string): Rules {
       ["model", isText, NOT_EMPTY, true],
       ["effort", isText, NOT_EMPTY, true],
       ["access", (value) => ACCESS.includes(value as string), `只能是 ${ACCESS.join("、")}`, true],
-      ["command", isSomeWords, "要是命令行的列表", !isObject(agent) || agent.use !== "command"],
+      ["command", isSomeWords, "要是命令行的列表", !isObject(agent) || agent.use !== "script"],
       ["timeout", isCount, "要是正整数（分钟）", true],
+      ["options", isObject, "要是插件配置对象", true],
     ]);
     if (isObject(agent)) agent.access ??= "edit";
   }

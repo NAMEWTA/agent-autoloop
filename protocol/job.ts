@@ -13,6 +13,7 @@ export type Job = {
     access: string;
     command?: string[];
     timeout?: number;
+    options?: Record<string, unknown>;
   };
   session: string | null;
   askFirst: string[];

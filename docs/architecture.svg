@@ -82,8 +82,8 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <!-- 4 个内核机制标签 -->
 <rect class="chip" x="268" y="180" width="424" height="40" rx="9"/>
 <rect class="tag" x="276" y="187" width="92" height="26" rx="6"/>
-<text x="322" y="204.5" class="tn" text-anchor="middle">挂起零消耗</text>
-<text x="378" y="204.5" class="td">等你拍板时进程直接退出，不烧 Token，回来接着原对话</text>
+<text x="322" y="204.5" class="tn" text-anchor="middle">业务等待</text>
+<text x="378" y="204.5" class="td">不自动开新模型轮次；原生终端仍可驻留</text>
 
 <rect class="chip" x="268" y="228" width="424" height="40" rx="9"/>
 <rect class="tag" x="276" y="235" width="92" height="26" rx="6"/>
@@ -114,19 +114,17 @@ text{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK S
 <!-- 右：Agent 插件 -->
 <rect class="plug" x="764" y="68" width="174" height="316" rx="14"/>
 <text x="780" y="100" class="h2">Agent 插件</text>
-<text x="780" y="121" class="s">负责干活的 AI</text>
+<text x="780" y="121" class="s">AI 统一执行入口</text>
 <rect class="item" x="778" y="142" width="146" height="36" rx="8"/>
-<text x="851" y="165" class="r" text-anchor="middle">Claude Code</text>
+<text x="851" y="165" class="r" text-anchor="middle">herdr-core</text>
 <rect class="item" x="778" y="188" width="146" height="36" rx="8"/>
-<text x="851" y="211" class="r" text-anchor="middle">Codex</text>
+<text x="851" y="211" class="r" text-anchor="middle">本机 profile</text>
 <rect class="item" x="778" y="234" width="146" height="36" rx="8"/>
-<text x="851" y="257" class="r" text-anchor="middle">DeepSeek Harness</text>
+<text x="851" y="257" class="r" text-anchor="middle">Herdr 原生终端</text>
 <rect class="item" x="778" y="280" width="146" height="36" rx="8"/>
-<text x="851" y="303" class="r" text-anchor="middle">Pi · OpenClaw</text>
+<text x="851" y="303" class="r" text-anchor="middle">本轮回执提交</text>
 <rect class="more" x="778" y="326" width="146" height="32" rx="8"/>
-<circle class="dot" cx="839" cy="342" r="2.4"/>
-<circle class="dot" cx="851" cy="342" r="2.4"/>
-<circle class="dot" cx="863" cy="342" r="2.4"/>
+<text x="851" y="347" class="r" text-anchor="middle">固定程序 · script</text>
 
 <!-- 下方人机闭环：4 拿不准才问你 -> 通道插件 -> 你 -> 5 拍板后接着干 -->
 <path class="conn" d="M560 386V448"/>

@@ -9,7 +9,7 @@ description: 配置 Agent 自动化中台：加规则、接新的事件插件、
 
 ## 看情况、回答
 
-`agent-autoloop status` 列出谁在线、等用户什么、在做什么、做过什么，还有按完成时间统计的今天和最近 7 天的轮数、Token 和费用（同一轮重试的已报用量相加，没上报的轮数会写出来）。`agent-autoloop answer <卡片> <序号>` 回答，`agent-autoloop resolve <卡片> <结果>` 结案，`agent-autoloop stop <第几轮>` 停掉一轮，等整个进程组退出才报告已停。
+`agent-autoloop status` 列出谁在线、等用户什么、在做什么、做过什么，还有按完成时间统计的今天和最近 7 天的轮数、Token 和费用（同一轮重试的已报用量相加，没上报的轮数会写出来）。`agent-autoloop answer <卡片> <序号>` 回答，`agent-autoloop resolve <卡片> <结果>` 结案，`agent-autoloop stop <第几轮>` 停掉一轮，等执行和桥接进程真正停止才报告已停；Herdr 原生终端必须由插件确认。
 
 这里没有网页。用户想要一个页面看全局，就替他写一个：读 `GET /v1/state`，密钥是 `config.json` 的 `owner`，请求见 `docs/protocol.md` 的「本人」一节。
 
@@ -20,15 +20,15 @@ description: 配置 Agent 自动化中台：加规则、接新的事件插件、
 每条规则回答五个问题：什么事件（`when`），交给谁（`to`），在哪（`cwd`），照什么做（`skill`、`prompt`），要不要告诉用户（`tell`，默认只在有卡片时）。
 
 ```json
-{ "name": "处理 issue", "when": { "source": "github", "types": ["issues.opened"] }, "to": "claude", "cwd": "~/code/app", "skill": "handle-issue", "parallel": 3 }
-{ "name": "早报", "when": { "cron": "0 9 * * *" }, "to": "codex", "cwd": "~/notes", "prompt": "写今天的早报。" }
+{ "name": "处理 issue", "when": { "source": "github", "types": ["issues.opened"] }, "to": "developer", "cwd": "~/code/app", "skill": "handle-issue", "parallel": 3 }
+{ "name": "早报", "when": { "cron": "0 9 * * *" }, "to": "developer", "cwd": "~/notes", "prompt": "写今天的早报。" }
 ```
 
-- 同一个对象的事件要分开处理、互不等待，就写 `parallel`。
+- 需要并行处理不同事项时写 `parallel`。Herdr 仍禁止未确认结束的任务共用 session 或真实 cwd；并行写同一仓库要使用不同 worktree。
 - 默认的先问清单是 `askFirst`，用户说什么事必须先问他，就改这里。
 - 用户在别的地方定时跑的任务（Claude、Codex 应用里），写进 `elsewhere`，只在 `agent-autoloop status` 里列出来；它们要找用户时运行 `agent-autoloop tell <编号> --task <任务名>`，内容从标准输入传。
 
-现成场景和内置插件从 [README](../../README.md#拿来即用的场景模板)进入，开发示例见[写插件](../../docs/plugins.md)。用户想接自动化时先从例子改，不要从零写：`examples/recipes/` 里有早报（`morning-brief`）、处理 GitHub issue（`github-issues`）、线上报错（`ops-alerts`）、反馈处理（`feedback`）、网站巡检（`website-watch`）、飞书周报与业务摘要（`feishu-brief`）和 Claude 浏览器交接（`browser-handoff`），每个都有规则、Skill 和写明权限原因的 README。反馈、巡检、飞书摘要和浏览器交接默认飞书本人私聊；按模板说明替换虚构标识，业务资料留在私有目录，读取用本人身份，通知用机器人身份。要写新的 Agent、通道或事件插件，看教程 `docs/plugins.md` 和最小例子 `examples/plugins/`。
+现成场景和内置插件从 [README](../../README.md#拿来即用的场景模板)进入，开发示例见[写插件](../../docs/plugins.md)。用户想接自动化时先从例子改，不要从零写：`examples/recipes/` 里有早报（`morning-brief`）、处理 GitHub issue（`github-issues`）、线上报错（`ops-alerts`）、反馈处理（`feedback`）、网站巡检（`website-watch`）、飞书周报与业务摘要（`feishu-brief`）和 浏览器交接（`browser-handoff`），每个都有规则、Skill 和写明权限原因的 README。反馈、巡检、飞书摘要和浏览器交接默认飞书本人私聊；按模板说明替换虚构标识，业务资料留在私有目录，读取用本人身份，通知用机器人身份。要写新的 Agent、通道或事件插件，看教程 `docs/plugins.md` 和最小例子 `examples/plugins/`。
 
 ## 写处理手册
 
@@ -44,27 +44,31 @@ description: 配置 Agent 自动化中台：加规则、接新的事件插件、
 
 1. **对方能发 HTTP**：`agent-autoloop key new source <名字>` 拿密钥（这是新建密钥，先问用户），`rules.json` 的 `sources` 登记，对方 `POST /v1/events`。
 2. **对方有自己的 Webhook 格式**：在 `~/.agent-autoloop/plugins/<名字>/source.ts` 写一个函数，验签并翻译成事件（见 `plugins/github/source.ts`），来源写 `"adapter": "<名字>"`，地址是 `/v1/in/<来源>`，秘密放 `~/.agent-autoloop/secrets.env` 的 `AGENT_AUTOLOOP_SECRET_<来源>`。对方要能连到中台，所以中台要在服务器上，或者用隧道。
-3. **对方推不过来，或者中台在家里**：定时跑一段脚本轮询，见 `examples/watch-github-issues.sh`。规则用 `use: "command"` 的 Agent，写上 `emits`。没新东西不花 Token。
+3. **对方推不过来，或者中台在家里**：定时跑一段脚本轮询，见 `examples/watch-github-issues.sh`。规则用 `use: "script"` 的 Agent，写上 `emits`。没新东西不花 Token。
 
 ## 接一个 Agent
 
-任何能打印最后一条消息的命令，在 `rules.json` 的 `agents` 写一行：
+AI 任务统一使用 Herdr。本机先安装并验证原生 template，在 `~/.agent-autoloop/herdr/profiles.json` 配置 profile，再在 `rules.json` 的 `agents` 登记：
 
 ```json
-"hermes": { "name": "Hermes", "worker": "my-mac", "use": "command", "command": ["hermes", "chat", "-Q", "-q", "{prompt}"] }
+"developer": {
+  "name": "开发 Agent",
+  "worker": "my-mac",
+  "use": "herdr-core",
+  "access": "edit",
+  "options": { "profile": "developer" }
+}
 ```
 
-退出码不是 0 算没跑成。要会话接续、打开会话的链接和用量统计，在 `~/.agent-autoloop/plugins/<名字>/agent.ts` 写一个插件（照 `plugins/codex/agent.ts`）：`command` 给命令行，`read` 从输出读最后一条消息和会话，`link` 给链接。
+`cwd` 在规则上配置，原生 CLI、模型、工具及权限放在可信 template；profile 的 `access` 必须与规则一致。不要再配置 AI 命令字符串或原生会话参数。完整字段、首次安装、升级和权限验收见 [Herdr 接入](../../docs/herdr-core.md)。安装入口为 `--profile developer`，固定的非 AI 可执行脚本可用 `--script /absolute/path/to/script`。
 
-`access` 默认 `edit`，专用插件翻译成对应 CLI 的权限；`command` 只传参数，不替任意程序限制权限，按该 CLI 文档配置。要完整权限、不审批的话写 `full`，先和用户说清楚。
+`agent-autoloop plugin herdr-core list` 列出绑定，`inspect <session>` 给出任务和实际终端，`pause / resume` 只控制之后的新输入，`stop` 请求并核实终端停止。结果不明时不重发、不新建会话，保持原来的执行证据。业务 `ask` 才是交给用户的决定；原生 CLI 自己等待审批不能自动翻译成业务卡片。
 
-第三方仓库根目录放 `agent.ts`、`channel.ts` 或 `source.ts`，用 `agent-autoloop add <git 地址>` 安装到 `~/.agent-autoloop/plugins/<仓库名>`。同名本机插件优先于内置插件，不自动更新。插件是可信代码，先读再装。
+原生 Agent 按本轮提示词给出的命令提交完整回执，不能只在终端打印代码块。要问人就提交并结束本轮；等待期间不自动新开模型轮次，原生进程仍可能驻留。回执修复只能修改结果文字和调用指定提交器，不重新执行业务。
 
-ACP 用 `use: "acp"` 和 `command: ["ACP 服务程序"]`，支持 v1 的会话新建、恢复、文字与一次性权限请求；先在该 Agent 自己的 CLI 登录。普通命令接法与实测支持范围见 README。
+第三方仓库根目录仍可放 `agent.ts`、`channel.ts` 或 `source.ts`，用 `agent-autoloop add <git 地址>` 安装到 `~/.agent-autoloop/plugins/<仓库名>`。同名本机插件优先，不自动更新。插件是可信代码，先读再装；本仓库不再维护多个品牌 AI 适配器。
 
-Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-handoff/` 配置已验收的入口、目标与允许操作，保留返回的 Codex 子会话编号；受阻由主任务交 `ask`，恢复后只续办网页步骤。入口调用模板不提供浏览器连接，也不修改桌面应用或授权。
-
-网页任务使用 Agent 已配置的浏览器工具。需要专用入口时，在规则的 `prompt` 或 `skill` 写明已有命令和会话接续方式，只交网页步骤，业务和回执仍由主任务负责。不能假定后台 CLI 已接通桌面浏览器；用同一后台方式验收页面和接续，见 `docs/plugins.md` 的「浏览器接入」。
+浏览器委托使用 `examples/recipes/browser-handoff/`。可信配置指定 browser profile、目标与允许操作，保留返回的 Autoloop 逻辑 session。网页助手有独立工作目录，结果不明时只核实原请求。主任务负责业务和中台回执。工具、登录和本人权限由原生环境提供；用实际 template 验收页面与第二轮接续，见 `docs/plugins.md` 的「浏览器接入」。
 
 ## 接一个通道
 
@@ -89,7 +93,7 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 
 ## 交付流水线
 
-需要这台接单电脑已有 `gh` 登录和审查程序。`delivery` 进程只执行本机插件和 main 指定的审查命令，PR 不检出、不在本机跑代码。先把项目的 `ops/delivery.json` 和审查要点放到 main：
+需要这台接单电脑已有 `gh` 登录和经过权限验收的只读 Herdr profile。`delivery` 的确定性步骤保持不变，AI 审查通过 main 选择的 profile 调用同一个 Herdr 任务接口；PR 不检出、不在本机跑代码。先把项目的 `ops/delivery.json` 和审查要点放到 main：
 
 ```json
 {
@@ -97,12 +101,14 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
   "internal": ["docs/**/*.md"],
   "check": { "workflow": "check.yml", "job": "check" },
   "ship": { "workflow": "ship.yml" },
-  "review": { "points": "AGENTS.md", "status": "agent-review", "xhigh": ["src/auth/*"] },
+  "review": { "points": "AGENTS.md", "profile": "review", "status": "agent-review", "xhigh": ["src/auth/*"], "xhighProfile": "review-deep" },
   "health": { "url": "https://app.example/health", "field": "commit", "pattern": "(?P<sha>[0-9a-f]{40})", "require": { "ok": true } }
 }
 ```
 
-`AGENTS.md` 要有 `## 审查要点`。`review.command` 可用命令数组替换审查程序：提示词从标准输入读，`{input}` 替换成文字差异文件，标准输出必须是 `{"findings":[{"title":"文件:行号和问题","text":"触发条件和后果"}]}`；没问题交空列表。默认 Codex 忽略用户配置、禁用记忆，只读单独的审查快照。`admin_merge` 默认为空；只有 main 明确列出的 PR 作者才能使用管理员合并。没有线上服务的项目可以省略 `health`，回执会明确写只完成合并。
+`AGENTS.md` 要有 `## 审查要点`。`review.profile` 必填，非空 `xhigh` 需要 `xhighProfile`；两者都是本机 `access: "read"` 的 profile。审查的完整回执文字必须是 `{"findings":[{"title":"文件:行号和问题","text":"触发条件和后果"}]}`；没问题交空列表。原生 Agent 仍通过本轮提交器交付这段文字。审查只读文字快照，不执行 PR 的代码、配置或工具；原生 template 的实际只读能力和回执通路要单独验收。固定身份的子任务在重试时只恢复原审查，未确认停止不得另起模型。
+
+`admin_merge` 默认为空；只有 main 明确列出的 PR 作者才能使用管理员合并。没有线上服务的项目可以省略 `health`，回执会明确写只完成合并。
 
 规则示例（把绝对路径、接单电脑和仓库改成自己的）：
 
@@ -110,7 +116,7 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 {
   "sources": { "github": { "name": "GitHub" } },
   "agents": {
-    "poll": { "name": "查看交付标签", "worker": "mac-mini", "use": "command", "command": ["node", "/绝对路径/agent-autoloop/plugins/delivery/poll.ts", "owner/app"] },
+    "poll": { "name": "查看交付标签", "worker": "mac-mini", "use": "script", "command": ["node", "/绝对路径/agent-autoloop/plugins/delivery/poll.ts", "owner/app"] },
     "delivery": { "name": "交付", "worker": "mac-mini", "use": "delivery", "command": ["owner/app"], "timeout": 35 }
   },
   "channels": {},
@@ -126,7 +132,7 @@ Claude 主任务要委托 Codex 操作网页时，从 `examples/recipes/browser-
 项目 Ship 只在 main 的 push 上运行，检出完整历史（checkout 的 `fetch-depth: 0`），然后调用这个仓库的 Action。把下面的占位提交换成发布后核实的完整 SHA：
 
 ```yaml
-- uses: KKKKhazix/agent-autoloop/plugins/delivery@<完整提交编号>
+- uses: NAMEWTA/agent-autoloop/plugins/delivery@<完整提交编号>
   id: scope
 - if: steps.scope.outputs.release == 'true' && steps.scope.outputs.superseded != 'true'
   run: ./项目已有的发布命令
@@ -147,7 +153,7 @@ MCP 客户端的启动程序填 `node`，参数为本机引擎绝对路径 `bin/
 1. 服务器上 `sh install.sh --no-service`，`config.json` 里 `hub.listen` 用 `127.0.0.1:3350`，`hub.publicUrl` 写公网地址，去掉 `worker`，再 `agent-autoloop service install`。前面放一个做 HTTPS 的反向代理（Caddy、nginx）。
 2. 每台干活的电脑：服务器上 `agent-autoloop key new worker <名字>`，电脑上 `agent-autoloop join https://中台地址 --worker <名字> --key <密钥>`。`rules.json` 的 Agent 写上对应的 `worker`。
 
-电脑不用开放任何端口，它们自己连过去。
+电脑不用开放任何端口，它们自己连过去。每台接单电脑分别配置自己的 Herdr profiles、原生登录和 templates；不要从中台同步登录凭据。
 
 ## 日志与恢复
 

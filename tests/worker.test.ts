@@ -34,6 +34,7 @@ writeFileSync(
   join(home, "plugins", "scripted", "agent.ts"),
   `
 export default {
+  capabilities: { resume: true },
   command: (t) => ["/bin/sh", "-c", t.command[0], "scripted", t.resume ?? "", t.prompt],
   read(stdout, code, stderr) {
     const session = /session=(\\S+)/.exec(stdout)?.[1];
@@ -45,6 +46,18 @@ export default {
   link: (s) => "app://" + s,
 };`,
 );
+
+// A disposable process fixture keeps lifecycle tests independent of production runtimes.
+mkdirSync(join(home, "plugins", "process-fixture"), { recursive: true });
+writeFileSync(join(home, "plugins", "process-fixture", "agent.ts"), `
+export default {
+  command: (t) => t.command.map((part) => part.replaceAll("{prompt}", t.prompt)),
+  read(stdout, code, stderr) {
+    if (code === null) return {};
+    if (code !== 0) return { error: "退出码 " + code + "：" + ((stderr || stdout).trim().slice(-300) || "没留下原因") };
+    return { text: stdout };
+  },
+};`);
 
 let nextRun = 1;
 const job = (
@@ -59,7 +72,7 @@ const job = (
   agent: {
     id: "a",
     name: "甲",
-    use: over.use ?? "command",
+    use: over.use ?? "process-fixture",
     access: "edit",
     command: over.command ?? ["/bin/sh", "-c", "echo 好了"],
     timeout: over.timeout,

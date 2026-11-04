@@ -1,7 +1,7 @@
 // Failure modes: characters in the install path execute as shell source, command arguments are re-parsed,
 // or the worker cannot recover the result from a directory containing quotes and command substitutions.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -14,6 +14,13 @@ process.env.AGENT_AUTOLOOP_HOME = home;
 process.env.SHELL = "/bin/sh";
 after(() => rmSync(scratch, { recursive: true, force: true }));
 const { createWorker } = await import("../worker/worker.ts");
+
+mkdirSync(join(home, "plugins", "process-fixture"), { recursive: true });
+writeFileSync(join(home, "plugins", "process-fixture", "agent.ts"), `
+export default {
+  command: (t) => t.command,
+  read: (stdout, code, stderr) => code === null ? {} : code === 0 ? { text: stdout } : { error: stderr },
+};`);
 
 test("install paths and command arguments stay literal through the worker wrapper", async () => {
   const results: any[] = [];
@@ -28,7 +35,7 @@ test("install paths and command arguments stay literal through the worker wrappe
     agent: {
       id: "a",
       name: "Agent",
-      use: "command",
+      use: "process-fixture",
       access: "edit",
       command: ["echo", "literal $(touch argv-injected)"],
     },
